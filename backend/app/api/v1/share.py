@@ -1,4 +1,5 @@
 import secrets
+import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
@@ -15,7 +16,7 @@ def get_db():
         db.close()
 
 @router.post("/{request_id}")
-def create_share_link(request_id: str, db: Session = Depends(get_db)):
+def create_share_link(request_id: uuid.UUID, db: Session = Depends(get_db)):
     req = db.get(MeetingRequest, request_id)
     if not req:
         raise HTTPException(status_code=404, detail="request not found")

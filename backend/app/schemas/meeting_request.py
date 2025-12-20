@@ -7,4 +7,4 @@ class MeetingRequestCreate(BaseModel):
     timezone: str = "America/New_York"
     window_start: str
     window_end: str
-    constraints: Dict[str, Any] = {}
+    constraints: Dict[str, Any] = Field(default_factory=dict)
