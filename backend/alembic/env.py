@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 from logging.config import fileConfig
 from pathlib import Path
@@ -19,13 +18,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# --- Set DB URL from environment (docker compose env_file .env) ---
-db_url = os.environ.get("DATABASE_URL")
-if not db_url:
-    raise RuntimeError("DATABASE_URL env var not set")
-config.set_main_option("sqlalchemy.url", db_url)
-
-# --- Import Base + models so metadata is populated ---
+# --- Import settings + Base + models so metadata is populated ---
+from app.core.config import settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
 import app.models  # noqa: F401, E402  (ensures models are imported)
 
@@ -35,6 +29,7 @@ target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
+    config.set_main_option("sqlalchemy.url", settings.database_url)
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -50,6 +45,7 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
+    config.set_main_option("sqlalchemy.url", settings.database_url)
     connectable = engine_from_config(
         config.get_section(config.config_ini_section) or {},
         prefix="sqlalchemy.",
