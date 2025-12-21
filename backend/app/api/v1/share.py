@@ -22,7 +22,7 @@ def create_share_link(request_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="request not found")
 
     token = secrets.token_urlsafe(32)[:48]
-    link = ShareLink(request_id=req.id, token=token)
+    link = ShareLink(meeting_request_id=req.id, token=token)
     db.add(link)
     db.commit()
     return {"token": token, "url": f"/v1/share/public/{token}"}
@@ -32,7 +32,7 @@ def get_share(token: str, db: Session = Depends(get_db)):
     link = db.query(ShareLink).filter(ShareLink.token == token).first()
     if not link:
         raise HTTPException(status_code=404, detail="invalid token")
-    req = db.get(MeetingRequest, link.request_id)
+    req = db.get(MeetingRequest, link.meeting_request_id)
     return {
         "request": {
             "id": str(req.id),
