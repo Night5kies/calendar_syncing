@@ -11,7 +11,9 @@ class MeetingRequest(Base):
     title: Mapped[str] = mapped_column(String(200))
     duration_min: Mapped[int] = mapped_column(Integer)
     timezone: Mapped[str] = mapped_column(String(64), default="America/New_York")
-    window_start: Mapped[str] = mapped_column(String(32))  # keep simple for now; upgrade to timestamptz
-    window_end: Mapped[str] = mapped_column(String(32))
+    window_start: Mapped[object] = mapped_column(DateTime(timezone=True))
+    window_end: Mapped[object] = mapped_column(DateTime(timezone=True))
     constraints: Mapped[dict] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), onupdate=func.now())
