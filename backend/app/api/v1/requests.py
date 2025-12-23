@@ -4,10 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import CurrentUser, get_current_user
 from app.db.deps import get_db
 from app.models.meeting_request import MeetingRequest
-from app.models.user import User
 from app.schemas.meeting_request import MeetingRequestCreate
 
 router = APIRouter()
@@ -16,9 +15,9 @@ router = APIRouter()
 def create_request(
     payload: MeetingRequestCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    organizer_id = current_user.id
+    organizer_id = current_user.user_id
     req = MeetingRequest(
         organizer_id=organizer_id,
         title=payload.title,
@@ -38,11 +37,11 @@ def create_request(
 def get_request(
     request_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     stmt = select(MeetingRequest).where(
         MeetingRequest.id == request_id,
-        MeetingRequest.organizer_id == current_user.id,
+        MeetingRequest.organizer_id == current_user.user_id,
     )
     req = db.execute(stmt).scalar_one_or_none()
     if not req:
