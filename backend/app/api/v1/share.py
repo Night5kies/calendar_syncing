@@ -39,8 +39,10 @@ def get_share(token: str, db: Session = Depends(get_db)):
             "title": req.title,
             "duration_min": req.duration_min,
             "timezone": req.timezone,
-            "window_start": req.window_start,
-            "window_end": req.window_end,
-            "constraints": req.constraints,
+            "event_type": req.event_type,
+            "location": req.location,
+            "video_link": req.video_link,
+            "notes": req.notes,
+            "status": req.status,
         }
     }
