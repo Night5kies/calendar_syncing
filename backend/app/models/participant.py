@@ -8,7 +8,7 @@ from app.db.base import Base
 class Participant(Base):
     __tablename__ = "participants"
     __table_args__ = (
-        UniqueConstraint("meeting_request_id", "email", name="uq_participants_request_email"),
+        UniqueConstraint("meeting_request_id", "contact_key", name="uq_participants_request_contact_key"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     meeting_request_id: Mapped[uuid.UUID] = mapped_column(
@@ -22,7 +22,9 @@ class Participant(Base):
         index=True,
         nullable=True,
     )
-    email: Mapped[str] = mapped_column(String(320), index=True)
+    email: Mapped[str | None] = mapped_column(String(320), index=True)
+    phone: Mapped[str | None] = mapped_column(String(32), index=True)
+    contact_key: Mapped[str] = mapped_column(String(380))
     display_name: Mapped[str | None] = mapped_column(String(200))
     role: Mapped[str] = mapped_column(String(32), default="attendee")
     status: Mapped[str] = mapped_column(String(32), default="invited", index=True)

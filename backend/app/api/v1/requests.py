@@ -23,9 +23,11 @@ def create_request(
         title=payload.title,
         duration_min=payload.duration_min,
         timezone=payload.timezone,
-        window_start=payload.window_start,
-        window_end=payload.window_end,
-        constraints=payload.constraints,
+        group_id=payload.group_id,
+        event_type=payload.event_type,
+        location=payload.location,
+        video_link=payload.video_link,
+        notes=payload.notes,
     )
     db.add(req)
     db.commit()
