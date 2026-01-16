@@ -16,6 +16,6 @@ class MeetingRequest(Base):
     location: Mapped[str | None] = mapped_column(String(255))
     video_link: Mapped[str | None] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(String(1000))
-    status: Mapped[str] = mapped_column(String(20), default="sent", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), onupdate=func.now())

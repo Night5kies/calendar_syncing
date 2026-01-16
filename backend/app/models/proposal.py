@@ -15,7 +15,6 @@ class Proposal(Base):
     )
     rank: Mapped[int] = mapped_column(Integer)
     start_at: Mapped[object] = mapped_column(DateTime(timezone=True))
-    end_at: Mapped[object] = mapped_column(DateTime(timezone=True))
     score: Mapped[float | None] = mapped_column(Float)
     meta: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())

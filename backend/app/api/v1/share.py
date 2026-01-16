@@ -24,6 +24,8 @@ def create_share_link(request_id: uuid.UUID, db: Session = Depends(get_db)):
     token = secrets.token_urlsafe(32)[:48]
     link = ShareLink(meeting_request_id=req.id, token=token)
     db.add(link)
+    if req.status == "draft":
+        req.status = "sent"
     db.commit()
     return {"token": token, "url": f"/v1/share/public/{token}"}
 

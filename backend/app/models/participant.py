@@ -28,4 +28,6 @@ class Participant(Base):
     display_name: Mapped[str | None] = mapped_column(String(200))
     role: Mapped[str] = mapped_column(String(32), default="attendee")
     status: Mapped[str] = mapped_column(String(32), default="invited", index=True)
+    responded_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    last_viewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
