@@ -1,0 +1,318 @@
+:root {
+  --ink: #18232f;
+  --muted: #5e6a73;
+  --surface: #fff9f0;
+  --surface-strong: #f4ead8;
+  --panel: rgba(255, 255, 255, 0.78);
+  --line: rgba(24, 35, 47, 0.12);
+  --accent: #d95d39;
+  --accent-dark: #9f3216;
+  --accent-soft: rgba(217, 93, 57, 0.12);
+  --success: #1a7f53;
+  --shadow: 0 24px 60px rgba(24, 35, 47, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(217, 93, 57, 0.14), transparent 28%),
+    linear-gradient(180deg, #fff8ee 0%, #f6efe5 100%);
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.shell {
+  width: min(1100px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0 4rem;
+}
+
+.shell-narrow {
+  width: min(820px, calc(100% - 2rem));
+}
+
+.hero {
+  display: grid;
+  gap: 1.5rem;
+  align-items: start;
+  grid-template-columns: 1.5fr 1fr;
+  padding-top: 2rem;
+}
+
+.hero h1,
+.page-head h1,
+.panel h2 {
+  margin: 0;
+  line-height: 0.96;
+  letter-spacing: -0.04em;
+}
+
+.hero h1 {
+  font-size: clamp(3rem, 7vw, 5.75rem);
+  max-width: 10ch;
+}
+
+.page-head h1 {
+  font-size: clamp(2.3rem, 5vw, 4rem);
+}
+
+.hero-copy,
+.hero-card,
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.hero-copy {
+  padding: 2rem;
+}
+
+.hero-card {
+  padding: 1.4rem;
+}
+
+.lede,
+.helper-copy {
+  color: var(--muted);
+}
+
+.lede {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  max-width: 42rem;
+}
+
+.eyebrow,
+.section-label {
+  margin: 0 0 0.8rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-dark);
+}
+
+.hero-actions,
+.button-group,
+.share-row,
+.panel-head,
+.field-grid,
+.choice-row,
+.option-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.hero-actions,
+.button-group {
+  flex-wrap: wrap;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 0.85rem 1.15rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: transform 160ms ease, background-color 160ms ease;
+}
+
+.button:hover,
+.choice-pill:hover,
+.inline-link:hover {
+  transform: translateY(-1px);
+}
+
+.button-primary {
+  background: var(--accent);
+  color: white;
+}
+
+.button-secondary {
+  background: white;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.grid-two {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 1.5rem;
+}
+
+.panel {
+  padding: 1.4rem;
+}
+
+.page-head {
+  margin-bottom: 1.5rem;
+  padding-top: 1.5rem;
+}
+
+.flat-list,
+.stack-form,
+.option-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.flat-list {
+  padding-left: 1.15rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.field span {
+  font-family: 'Courier New', monospace;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: white;
+  padding: 0.9rem 1rem;
+}
+
+.option-card,
+.option-row,
+.stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.option-card {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: white;
+  padding: 1rem;
+  text-align: left;
+}
+
+.option-card-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.option-copy {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.option-copy p,
+.stat-row {
+  margin: 0;
+}
+
+.status-pill,
+.chip,
+.choice-pill {
+  border-radius: 999px;
+  padding: 0.38rem 0.75rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+}
+
+.chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chip,
+.status-pending {
+  background: var(--accent-soft);
+}
+
+.status-confirmed {
+  background: rgba(26, 127, 83, 0.14);
+  color: var(--success);
+}
+
+.choice-pill {
+  border: 1px solid var(--line);
+  background: white;
+}
+
+.choice-pill-active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: white;
+}
+
+.inline-link {
+  background: transparent;
+  border: 0;
+  color: var(--accent-dark);
+  cursor: pointer;
+  padding: 0;
+}
+
+.error-text {
+  color: #a52424;
+  margin: 0;
+}
+
+.success-text {
+  color: var(--success);
+  margin: 0;
+}
+
+code {
+  overflow-wrap: anywhere;
+  font-family: 'Courier New', monospace;
+}
+
+@media (max-width: 800px) {
+  .hero,
+  .grid-two,
+  .field-grid,
+  .option-card,
+  .option-row,
+  .share-row {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero h1 {
+    max-width: none;
+  }
+}
