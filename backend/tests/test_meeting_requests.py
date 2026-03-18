@@ -4,7 +4,14 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from app.schemas.proposal_response import ProposalResponseCreate
-from app.services.meeting_requests import compute_end_at, next_status_on_response, scheduled_event_snapshot
+from app.services.meeting_requests import (
+    MAX_MANUAL_PROPOSALS,
+    can_edit_proposals,
+    compute_end_at,
+    next_status_on_response,
+    scheduled_event_snapshot,
+    validate_manual_proposal_rules,
+)
 
 
 class MeetingRequestTests(unittest.TestCase):
@@ -48,6 +55,15 @@ class MeetingRequestTests(unittest.TestCase):
         start_at = datetime(2026, 1, 6, 12, 0, tzinfo=timezone.utc)
         end_at = compute_end_at(start_at, 45)
         self.assertEqual(end_at, datetime(2026, 1, 6, 12, 45, tzinfo=timezone.utc))
+
+    def test_manual_proposal_rules(self) -> None:
+        self.assertTrue(can_edit_proposals("draft"))
+        self.assertFalse(can_edit_proposals("sent"))
+        validate_manual_proposal_rules("draft", MAX_MANUAL_PROPOSALS - 1)
+        with self.assertRaises(ValueError):
+            validate_manual_proposal_rules("sent", 0)
+        with self.assertRaises(ValueError):
+            validate_manual_proposal_rules("draft", MAX_MANUAL_PROPOSALS)
 
 
 if __name__ == "__main__":

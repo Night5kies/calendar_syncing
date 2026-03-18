@@ -1,10 +1,13 @@
 import secrets
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.models.share_link import ShareLink
 from app.models.meeting_request import MeetingRequest
+from app.models.proposal import Proposal
+from app.services.meeting_requests import compute_end_at
 
 router = APIRouter()
 
@@ -35,6 +38,15 @@ def get_share(token: str, db: Session = Depends(get_db)):
     if not link:
         raise HTTPException(status_code=404, detail="invalid token")
     req = db.get(MeetingRequest, link.meeting_request_id)
+    proposals = (
+        db.execute(
+            select(Proposal)
+            .where(Proposal.meeting_request_id == req.id)
+            .order_by(Proposal.rank)
+        )
+        .scalars()
+        .all()
+    )
     return {
         "request": {
             "id": str(req.id),
@@ -46,5 +58,16 @@ def get_share(token: str, db: Session = Depends(get_db)):
             "video_link": req.video_link,
             "notes": req.notes,
             "status": req.status,
+            "proposals": [
+                {
+                    "id": str(proposal.id),
+                    "rank": proposal.rank,
+                    "start_at": proposal.start_at.isoformat(),
+                    "end_at": compute_end_at(proposal.start_at, req.duration_min).isoformat(),
+                    "score": proposal.score,
+                    "meta": proposal.meta,
+                }
+                for proposal in proposals
+            ],
         }
     }

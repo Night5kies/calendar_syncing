@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_current_user
@@ -14,7 +14,12 @@ from app.models.proposal_response import ProposalResponse
 from app.models.scheduled_event import ScheduledEvent
 from app.schemas.meeting_request import MeetingRequestCreate, ParticipantCreate, ProposalCreate
 from app.schemas.proposal_response import ProposalResponseCreate, RequestFinalize
-from app.services.meeting_requests import compute_end_at, next_status_on_response, scheduled_event_snapshot
+from app.services.meeting_requests import (
+    compute_end_at,
+    next_status_on_response,
+    scheduled_event_snapshot,
+    validate_manual_proposal_rules,
+)
 
 router = APIRouter()
 
@@ -194,6 +199,14 @@ def create_proposal(
     req = db.get(MeetingRequest, request_id)
     if not req or req.organizer_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+
+    proposal_count = db.execute(
+        select(func.count()).select_from(Proposal).where(Proposal.meeting_request_id == request_id)
+    ).scalar_one()
+    try:
+        validate_manual_proposal_rules(req.status, proposal_count)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     try:
         start_at = datetime.fromisoformat(payload.start_at)
