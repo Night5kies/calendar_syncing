@@ -12,6 +12,7 @@ from app.models.participant import Participant
 from app.models.proposal import Proposal
 from app.models.proposal_response import ProposalResponse
 from app.models.scheduled_event import ScheduledEvent
+from app.models.share_link import ShareLink
 from app.schemas.meeting_request import MeetingRequestCreate, ParticipantCreate, ProposalCreate
 from app.schemas.proposal_response import ProposalResponseCreate, RequestFinalize
 from app.services.meeting_requests import (
@@ -67,6 +68,37 @@ def get_request(
         .scalars()
         .all()
     )
+    participants = (
+        db.execute(select(Participant).where(Participant.meeting_request_id == request_id))
+        .scalars()
+        .all()
+    )
+    responses = (
+        db.execute(select(ProposalResponse).where(ProposalResponse.meeting_request_id == request_id))
+        .scalars()
+        .all()
+    )
+    share_link = db.execute(
+        select(ShareLink).where(ShareLink.meeting_request_id == request_id).order_by(ShareLink.created_at.desc())
+    ).scalar_one_or_none()
+
+    tallies: dict[str, dict[str, int]] = {
+        str(proposal.id): {"picked": 0, "maybe": 0, "declined": 0} for proposal in proposals
+    }
+    unassigned_maybe = 0
+    declined_count = 0
+    responded_participant_ids: set[uuid.UUID] = set()
+    for response in responses:
+        responded_participant_ids.add(response.participant_id)
+        if response.choice == "picked" and response.proposal_id:
+            tallies[str(response.proposal_id)]["picked"] += 1
+        elif response.choice == "maybe":
+            if response.proposal_id:
+                tallies[str(response.proposal_id)]["maybe"] += 1
+            else:
+                unassigned_maybe += 1
+        elif response.choice == "declined":
+            declined_count += 1
 
     return {
         "id": str(req.id),
@@ -93,6 +125,40 @@ def get_request(
             }
             for proposal in proposals
         ],
+        "participants": [
+            {
+                "id": str(participant.id),
+                "display_name": participant.display_name,
+                "email": participant.email,
+                "phone": participant.phone,
+                "status": participant.status,
+                "responded_at": participant.responded_at.isoformat() if participant.responded_at else None,
+            }
+            for participant in participants
+        ],
+        "responses": [
+            {
+                "participant_id": str(response.participant_id),
+                "proposal_id": str(response.proposal_id) if response.proposal_id else None,
+                "choice": response.choice,
+                "comment": response.comment,
+            }
+            for response in responses
+        ],
+        "progress": {
+            "responded_count": len(responded_participant_ids),
+            "participant_count": len(participants),
+            "outstanding_count": max(len(participants) - len(responded_participant_ids), 0),
+            "declined_count": declined_count,
+            "unassigned_maybe_count": unassigned_maybe,
+        },
+        "tallies": tallies,
+        "share": {
+            "token": share_link.token,
+            "url": f"/v1/share/public/{share_link.token}",
+        }
+        if share_link
+        else None,
         "created_at": req.created_at.isoformat() if req.created_at else None,
     }
 
