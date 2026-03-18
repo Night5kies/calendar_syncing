@@ -30,7 +30,7 @@ class _AttendeeShareScreenState extends ConsumerState<AttendeeShareScreen> {
     }
 
     return AppScaffold(
-      title: 'Share availability',
+      title: 'Respond to request',
       child: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         children: [
@@ -50,13 +50,13 @@ class _AttendeeShareScreenState extends ConsumerState<AttendeeShareScreen> {
           ),
           const SizedBox(height: 20),
           Text(
-            'Pick what works for you',
+            'Pick every option that works for you',
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 12),
           if (request.slots.isEmpty)
             Text(
-              'No time options yet. Ask the host to generate options.',
+              'No time options yet. Ask the host to add manual options.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Theme.of(context)
                         .colorScheme
@@ -87,10 +87,10 @@ class _AttendeeShareScreenState extends ConsumerState<AttendeeShareScreen> {
             ),
           const SizedBox(height: 24),
           PrimaryButton(
-            label: 'Submit availability',
+            label: 'Submit response',
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Availability sent (mock).')),
+                const SnackBar(content: Text('Response sent (mock).')),
               );
             },
           ),

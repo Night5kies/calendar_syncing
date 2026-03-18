@@ -37,12 +37,13 @@ class SlotCard extends StatelessWidget {
                   style: theme.textTheme.titleSmall,
                 ),
               ),
-              Text(
-                '${slot.score}%',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: theme.colorScheme.primary,
+              if (slot.score > 0)
+                Text(
+                  '${slot.score}%',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.primary,
+                  ),
                 ),
-              ),
             ],
           ),
           const SizedBox(height: 6),

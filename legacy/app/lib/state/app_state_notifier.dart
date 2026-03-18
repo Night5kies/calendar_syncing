@@ -54,38 +54,6 @@ class AppStateNotifier extends StateNotifier<AppState> {
         preview: 'Request: ${request.title}');
   }
 
-  Future<void> generateTimeSlots(String requestId) async {
-    if (state.generatingRequests.contains(requestId)) {
-      return;
-    }
-    final generating = Set<String>.from(state.generatingRequests)
-      ..add(requestId);
-    state = state.copyWith(generatingRequests: generating);
-
-    await Future.delayed(const Duration(milliseconds: 1400));
-
-    final request = state.requestsById[requestId];
-    if (request == null) {
-      return;
-    }
-
-    final slots = _repository.buildMockSlots(request.dateRangeStart);
-    final updated = request.copyWith(
-      status: MeetingRequestStatus.optionsGenerated,
-      slots: slots,
-    );
-
-    final updatedRequests = Map<String, MeetingRequest>.from(state.requestsById)
-      ..[requestId] = updated;
-    final nextGenerating = Set<String>.from(state.generatingRequests)
-      ..remove(requestId);
-
-    state = state.copyWith(
-      requestsById: updatedRequests,
-      generatingRequests: nextGenerating,
-    );
-  }
-
   void confirmSlot(String requestId, TimeSlot slot) {
     final request = state.requestsById[requestId];
     if (request == null) {

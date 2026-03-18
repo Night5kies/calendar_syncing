@@ -26,8 +26,6 @@ class RequestDetailScreen extends ConsumerWidget {
         body: const Center(child: Text('Request not found')),
       );
     }
-    final isGenerating = state.generatingRequests.contains(requestId);
-
     return AppScaffold(
       title: 'Request details',
       actions: [
@@ -35,11 +33,13 @@ class RequestDetailScreen extends ConsumerWidget {
           icon: const Icon(Icons.ios_share),
           onPressed: () async {
             await Clipboard.setData(
-              const ClipboardData(text: 'https://sync.app/r/1234'),
+              ClipboardData(text: '/share/$requestId'),
             );
             if (!context.mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Share link copied.')),
+              const SnackBar(
+                content: Text('Test route copied. Use it inside the app.'),
+              ),
             );
           },
         ),
@@ -61,6 +61,11 @@ class RequestDetailScreen extends ConsumerWidget {
           const SizedBox(height: 8),
           _StatusLine(status: request.status),
           const SizedBox(height: 20),
+          Text(
+            'This request follows the MVP flow: manual options, quick responses, and organizer confirmation.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 20),
           const SectionHeader(title: 'Participants'),
           const SizedBox(height: 8),
           Wrap(
@@ -76,26 +81,12 @@ class RequestDetailScreen extends ConsumerWidget {
             const SizedBox(height: 8),
             Text(request.notes!),
           ],
-          const SizedBox(height: 20),
-          PrimaryButton(
-            label: 'Generate time options',
-            isLoading: isGenerating,
-            onPressed: () async {
-              await ref
-                  .read(appStateProvider.notifier)
-                  .generateTimeSlots(requestId);
-              if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Time options ready.')),
-              );
-            },
-          ),
           const SizedBox(height: 24),
-          const SectionHeader(title: 'Ranked options'),
+          const SectionHeader(title: 'Proposed times'),
           const SizedBox(height: 12),
           if (request.slots.isEmpty)
             Text(
-              'Generate options to see recommended times.',
+              'No time options have been added yet.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Theme.of(context)
                         .colorScheme
@@ -117,7 +108,7 @@ class RequestDetailScreen extends ConsumerWidget {
                               .confirmSlot(requestId, slot);
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('Time confirmed (mock).'),
+                              content: Text('Time confirmed.'),
                             ),
                           );
                         },
@@ -140,18 +131,20 @@ class RequestDetailScreen extends ConsumerWidget {
               children: [
                 Expanded(
                   child: Text(
-                    'https://sync.app/r/1234',
+                    '/share/$requestId',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
                 TextButton(
                   onPressed: () async {
                     await Clipboard.setData(
-                      const ClipboardData(text: 'https://sync.app/r/1234'),
+                      ClipboardData(text: '/share/$requestId'),
                     );
                     if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Link copied.')),
+                      const SnackBar(
+                        content: Text('Test route copied.'),
+                      ),
                     );
                   },
                   child: const Text('Copy'),
@@ -160,6 +153,13 @@ class RequestDetailScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 20),
+          PrimaryButton(
+            label: 'Preview attendee view',
+            onPressed: () {
+              context.push('/share/$requestId');
+            },
+          ),
+          const SizedBox(height: 12),
           PrimaryButton(
             label: 'Back to chat',
             onPressed: () {
