@@ -3,12 +3,14 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
+
 import {
   finalizeRequest,
   getOrganizerRequest,
+  pingNonResponders,
   type OrganizerRequestDetail,
 } from '../../../lib/api';
-import { formatRange } from '../../../lib/types';
+import { formatDateTime, formatRange } from '../../../lib/types';
 
 export default function RequestDetailPage() {
   const params = useParams<{ id: string }>();
@@ -17,6 +19,8 @@ export default function RequestDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [loadingProposalId, setLoadingProposalId] = useState<string | null>(null);
+  const [pingMessage, setPingMessage] = useState<string | null>(null);
+  const [isPinging, setIsPinging] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,6 +67,26 @@ export default function RequestDetailPage() {
     }
   }
 
+  async function pingOutstanding() {
+    setError(null);
+    setPingMessage(null);
+    setIsPinging(true);
+    try {
+      const result = await pingNonResponders(requestId);
+      setPingMessage(
+        result.sent_count > 0
+          ? `Queued ${result.sent_count} reminders for non-responders.`
+          : 'No new reminders were queued.',
+      );
+      const next = await getOrganizerRequest(requestId);
+      setRequest(next);
+    } catch (pingError) {
+      setError(pingError instanceof Error ? pingError.message : 'Unable to ping non-responders.');
+    } finally {
+      setIsPinging(false);
+    }
+  }
+
   if (error) {
     return (
       <main className="shell shell-narrow">
@@ -80,7 +104,7 @@ export default function RequestDetailPage() {
       <main className="shell shell-narrow">
         <div className="page-head">
           <p className="eyebrow">Organizer view</p>
-          <h1>Loading request…</h1>
+          <h1>Loading request...</h1>
         </div>
       </main>
     );
@@ -94,8 +118,8 @@ export default function RequestDetailPage() {
         <p className="eyebrow">Organizer view</p>
         <h1>{request.title}</h1>
         <p className="lede">
-          {request.duration_min} min · {request.timezone}
-          {request.event_type ? ` · ${request.event_type}` : ''}
+          {request.duration_min} min - {request.timezone}
+          {request.event_type ? ` - ${request.event_type}` : ''}
         </p>
       </div>
 
@@ -110,7 +134,7 @@ export default function RequestDetailPage() {
             ))}
           </div>
           <p className="helper-copy">
-            {request.progress.responded_count}/{request.progress.participant_count} responded ·{' '}
+            {request.progress.responded_count}/{request.progress.participant_count} responded -{' '}
             {request.progress.outstanding_count} outstanding
           </p>
           {request.notes ? <p className="helper-copy">{request.notes}</p> : null}
@@ -141,6 +165,52 @@ export default function RequestDetailPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
+            <p className="section-label">Reminders</p>
+            <h2>Follow-up state</h2>
+          </div>
+          <button
+            className="button button-secondary"
+            disabled={isPinging || request.outstanding_participants.length === 0}
+            onClick={pingOutstanding}
+            type="button"
+          >
+            {isPinging ? 'Queueing...' : 'Ping non-responders'}
+          </button>
+        </div>
+        <div className="flat-list">
+          <div className="stat-row">
+            <span>Auto reminders</span>
+            <strong>{request.reminders.enabled ? 'On' : 'Off'}</strong>
+          </div>
+          <div className="stat-row">
+            <span>Response deadline</span>
+            <strong>{formatDateTime(request.reminders.response_deadline, request.timezone)}</strong>
+          </div>
+          <div className="stat-row">
+            <span>Last reminder</span>
+            <strong>{formatDateTime(request.reminders.last_reminded_at, request.timezone)}</strong>
+          </div>
+          <div className="stat-row">
+            <span>Total queued reminders</span>
+            <strong>{request.reminders.sent_count}</strong>
+          </div>
+        </div>
+        {request.outstanding_participants.length > 0 ? (
+          <p className="helper-copy">
+            Waiting on{' '}
+            {request.outstanding_participants
+              .map((participant) => participant.display_name ?? participant.email ?? participant.phone ?? 'Guest')
+              .join(', ')}
+          </p>
+        ) : (
+          <p className="helper-copy">Everyone has responded.</p>
+        )}
+        {pingMessage ? <p className="success-text">{pingMessage}</p> : null}
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
             <p className="section-label">Manual poll</p>
             <h2>Proposed times</h2>
           </div>
@@ -160,7 +230,7 @@ export default function RequestDetailPage() {
                   <strong>Option {index + 1}</strong>
                   <p>{formatRange(proposal.start_at, proposal.end_at, request.timezone)}</p>
                   <p className="helper-copy">
-                    {tally.picked} picked · {tally.maybe} maybe
+                    {tally.picked} picked - {tally.maybe} maybe
                   </p>
                 </div>
                 <button
@@ -169,13 +239,51 @@ export default function RequestDetailPage() {
                   onClick={() => confirmOption(proposal.id)}
                   type="button"
                 >
-                  {loadingProposalId === proposal.id ? 'Confirming…' : 'Confirm winner'}
+                  {loadingProposalId === proposal.id ? 'Confirming...' : 'Confirm winner'}
                 </button>
               </article>
             );
           })}
         </div>
       </section>
+
+      {request.confirmed_event ? (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="section-label">Confirmation</p>
+              <h2>Booked artifact</h2>
+            </div>
+            <span className="status-pill status-confirmed">confirmed</span>
+          </div>
+          <div className="flat-list">
+            <div className="stat-row">
+              <span>Calendar write-back</span>
+              <strong>
+                {request.confirmed_event.provider
+                  ? `Sent to ${request.confirmed_event.provider}`
+                  : 'Not connected'}
+              </strong>
+            </div>
+            <div className="stat-row">
+              <span>Provider event id</span>
+              <strong>{request.confirmed_event.provider_event_id ?? 'Unavailable'}</strong>
+            </div>
+          </div>
+          {request.confirmed_event.artifact_url ? (
+            <div className="button-group">
+              <a
+                className="button button-primary"
+                href={request.confirmed_event.artifact_url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Download ICS
+              </a>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
     </main>
   );
 }

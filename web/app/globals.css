@@ -193,6 +193,10 @@ select {
   gap: 0.45rem;
 }
 
+.field-checkbox {
+  align-content: end;
+}
+
 .field span {
   font-family: 'Courier New', monospace;
   font-size: 0.84rem;
@@ -207,6 +211,21 @@ select {
   border-radius: 16px;
   background: white;
   padding: 0.9rem 1rem;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3.4rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: white;
+  padding: 0.9rem 1rem;
+}
+
+.checkbox-row input {
+  width: auto;
 }
 
 .option-card,

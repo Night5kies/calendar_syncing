@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+
 import {
   addParticipant,
   addProposal,
@@ -15,13 +16,13 @@ type OptionForm = {
   start: string;
 };
 
-const templates: RequestTemplate[] = ['meal', 'coffee', 'study', 'hangout'];
-
 type ParsedParticipant = {
   displayName: string;
   email?: string;
   phone?: string;
 };
+
+const templates: RequestTemplate[] = ['meal', 'coffee', 'study', 'hangout'];
 
 function defaultOption(offsetDays: number, hour: number) {
   const date = new Date();
@@ -68,6 +69,8 @@ export default function CreatePage() {
   const [durationMinutes, setDurationMinutes] = useState(90);
   const [timezone, setTimezone] = useState('America/New_York');
   const [notes, setNotes] = useState('');
+  const [responseDeadline, setResponseDeadline] = useState(defaultOption(1, 21));
+  const [remindersEnabled, setRemindersEnabled] = useState(true);
   const [participants, setParticipants] = useState(
     'Alex | alex@example.com\nJules | 555-222-0101\nMaya | maya@example.com',
   );
@@ -141,6 +144,8 @@ export default function CreatePage() {
         timezone,
         event_type: template,
         notes: notes || null,
+        response_deadline: responseDeadline ? new Date(responseDeadline).toISOString() : null,
+        reminders_enabled: remindersEnabled,
       });
 
       for (const participant of parsedParticipants) {
@@ -161,11 +166,9 @@ export default function CreatePage() {
       await createShareLink(request.id);
       router.push(`/request/${request.id}`);
     } catch (submissionError) {
-      const message =
-        submissionError instanceof Error
-          ? submissionError.message
-          : 'Unable to create request.';
-      setError(message);
+      setError(
+        submissionError instanceof Error ? submissionError.message : 'Unable to create request.',
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -177,8 +180,8 @@ export default function CreatePage() {
         <p className="eyebrow">Organizer flow</p>
         <h1>Create a request</h1>
         <p className="lede">
-          This is now wired to the FastAPI backend. The local organizer auth path
-          is enabled in backend local mode.
+          This is now wired to the FastAPI backend. The local organizer auth path is enabled in
+          backend local mode.
         </p>
       </div>
 
@@ -226,6 +229,28 @@ export default function CreatePage() {
           />
         </label>
 
+        <div className="field-grid">
+          <label className="field">
+            <span>Response deadline</span>
+            <input
+              type="datetime-local"
+              value={responseDeadline}
+              onChange={(event) => setResponseDeadline(event.target.value)}
+            />
+          </label>
+          <div className="field field-checkbox">
+            <span>Reminder policy</span>
+            <label className="checkbox-row">
+              <input
+                checked={remindersEnabled}
+                onChange={(event) => setRemindersEnabled(event.target.checked)}
+                type="checkbox"
+              />
+              <span>Auto-remind non-responders</span>
+            </label>
+          </div>
+        </div>
+
         <label className="field">
           <span>Participants</span>
           <textarea
@@ -252,11 +277,7 @@ export default function CreatePage() {
               <p className="section-label">Manual poll</p>
               <h2>Time options</h2>
             </div>
-            <button
-              className="button button-secondary"
-              onClick={addOption}
-              type="button"
-            >
+            <button className="button button-secondary" onClick={addOption} type="button">
               Add option
             </button>
           </div>
@@ -287,7 +308,7 @@ export default function CreatePage() {
         {error ? <p className="error-text">{error}</p> : null}
 
         <button className="button button-primary" disabled={isSubmitting} type="submit">
-          {isSubmitting ? 'Creating…' : 'Create request'}
+          {isSubmitting ? 'Creating...' : 'Create request'}
         </button>
       </form>
     </main>

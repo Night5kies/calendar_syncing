@@ -5,11 +5,11 @@ export default function HomePage() {
     <main className="shell">
       <section className="hero">
         <div className="hero-copy">
-          <p className="eyebrow">SYZY · Next.js-first</p>
+          <p className="eyebrow">SYZY - Next.js-first</p>
           <h1>Use chat for discussion. Use SYZY for decision and follow-through.</h1>
           <p className="lede">
-            A mobile-web scheduling flow for meals, coffee, hangouts, and small
-            group plans. No app install required for guests.
+            A mobile-web scheduling flow for meals, coffee, hangouts, and small group plans. No
+            app install required for guests.
           </p>
           <div className="hero-actions">
             <Link className="button button-primary" href="/create">
@@ -27,7 +27,7 @@ export default function HomePage() {
           </div>
           <div className="stat-row">
             <span>Organizer goal</span>
-            <strong>Get from “maybe” to booked</strong>
+            <strong>Get from "maybe" to booked</strong>
           </div>
           <div className="stat-row">
             <span>Attendee friction</span>
@@ -35,7 +35,7 @@ export default function HomePage() {
           </div>
           <div className="stat-row">
             <span>Core MVP</span>
-            <strong>Manual poll + response link + reminders later</strong>
+            <strong>Manual poll + response link + reminders + confirmation artifact</strong>
           </div>
         </div>
       </section>
@@ -45,9 +45,8 @@ export default function HomePage() {
           <p className="section-label">Why web first</p>
           <h2>Less friction at the exact moment people are asked to respond.</h2>
           <p>
-            The first interaction is usually a text message, not an app store
-            search. A Next.js-first launch keeps the invite flow native to how
-            people already coordinate.
+            The first interaction is usually a text message, not an app store search. A Next.js-first
+            launch keeps the invite flow native to how people already coordinate.
           </p>
         </article>
         <article className="panel">
@@ -56,7 +55,8 @@ export default function HomePage() {
             <li>Create a request with 3-5 manual options</li>
             <li>View organizer request details</li>
             <li>Open an attendee response page from a link</li>
-            <li>Confirm a winning option in the organizer view</li>
+            <li>Ping non-responders</li>
+            <li>Confirm a winning option and download an ICS artifact</li>
           </ul>
         </article>
       </section>

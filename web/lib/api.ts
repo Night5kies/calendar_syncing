@@ -47,6 +47,12 @@ export type OrganizerRequestDetail = {
     declined_count: number;
     unassigned_maybe_count: number;
   };
+  outstanding_participants: Array<{
+    id: string;
+    display_name: string | null;
+    email: string | null;
+    phone: string | null;
+  }>;
   tallies: Record<
     string,
     {
@@ -55,9 +61,31 @@ export type OrganizerRequestDetail = {
       declined: number;
     }
   >;
+  reminders: {
+    enabled: boolean;
+    response_deadline: string | null;
+    last_reminded_at: string | null;
+    sent_count: number;
+    history: Array<{
+      id: string;
+      participant_id: string;
+      channel: string;
+      reason: string;
+      status: string;
+      target: string;
+      created_at: string | null;
+    }>;
+  };
   share: {
     token: string;
     url: string;
+  } | null;
+  confirmed_event: {
+    id: string;
+    provider: string | null;
+    provider_event_id: string | null;
+    artifact_uid: string | null;
+    artifact_url: string | null;
   } | null;
 };
 
@@ -88,6 +116,8 @@ export async function createRequest(payload: {
   timezone: string;
   event_type: string | null;
   notes: string | null;
+  response_deadline: string | null;
+  reminders_enabled: boolean;
 }) {
   return request<{ id: string }>('/v1/requests', {
     method: 'POST',
@@ -129,6 +159,17 @@ export async function finalizeRequest(requestId: string, proposalId: string) {
   return request<{ id: string }>(`/v1/requests/${requestId}/finalize`, {
     method: 'POST',
     body: JSON.stringify({ proposal_id: proposalId }),
+  });
+}
+
+export async function pingNonResponders(requestId: string) {
+  return request<{
+    sent_count: number;
+    skipped_count: number;
+    outstanding_count: number;
+    message_preview: string[];
+  }>(`/v1/requests/${requestId}/reminders/ping`, {
+    method: 'POST',
   });
 }
 

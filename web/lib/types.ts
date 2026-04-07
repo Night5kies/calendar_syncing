@@ -54,7 +54,7 @@ export function getTallies(request: RequestRecord): OptionTallies {
 }
 
 export function formatTallies(tally: { yes: number; maybe: number; no: number }) {
-  return `${tally.yes} yes · ${tally.maybe} maybe · ${tally.no} no`;
+  return `${tally.yes} yes - ${tally.maybe} maybe - ${tally.no} no`;
 }
 
 export function formatRange(startIso: string, endIso: string, timezone: string) {
@@ -69,4 +69,18 @@ export function formatRange(startIso: string, endIso: string, timezone: string) 
   return `${formatter.format(new Date(startIso))} - ${formatter.format(
     new Date(endIso),
   )}`;
+}
+
+export function formatDateTime(iso: string | null, timezone: string) {
+  if (!iso) {
+    return 'Not set';
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: timezone,
+  }).format(new Date(iso));
 }

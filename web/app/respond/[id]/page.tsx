@@ -2,6 +2,7 @@
 
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+
 import { getPublicShare, submitPublicResponse, type PublicSharePayload } from '../../../lib/api';
 import { formatRange } from '../../../lib/types';
 
@@ -110,7 +111,7 @@ export default function RespondPage() {
       <main className="shell shell-narrow">
         <div className="page-head">
           <p className="eyebrow">Attendee view</p>
-          <h1>Loading request…</h1>
+          <h1>Loading request...</h1>
         </div>
       </main>
     );
@@ -121,9 +122,7 @@ export default function RespondPage() {
       <div className="page-head">
         <p className="eyebrow">Attendee view</p>
         <h1>{request.title}</h1>
-        <p className="lede">
-          Respond from the browser. No account or app install is required.
-        </p>
+        <p className="lede">Respond from the browser. No account or app install is required.</p>
       </div>
 
       <form className="stack-form" onSubmit={(event) => event.preventDefault()}>
@@ -156,9 +155,7 @@ export default function RespondPage() {
             {request.proposals.map((proposal, index) => (
               <button
                 className={
-                  selectedProposalId === proposal.id
-                    ? 'option-card option-card-active'
-                    : 'option-card'
+                  selectedProposalId === proposal.id ? 'option-card option-card-active' : 'option-card'
                 }
                 key={proposal.id}
                 onClick={() => setSelectedProposalId(proposal.id)}
@@ -190,7 +187,7 @@ export default function RespondPage() {
             onClick={() => submit('picked')}
             type="button"
           >
-            {submittingChoice === 'picked' ? 'Submitting…' : 'Pick selected time'}
+            {submittingChoice === 'picked' ? 'Submitting...' : 'Pick selected time'}
           </button>
           <button
             className="button button-secondary"
@@ -198,7 +195,7 @@ export default function RespondPage() {
             onClick={() => submit('maybe')}
             type="button"
           >
-            {submittingChoice === 'maybe' ? 'Submitting…' : 'Maybe'}
+            {submittingChoice === 'maybe' ? 'Submitting...' : 'Maybe'}
           </button>
           <button
             className="button button-secondary"
@@ -206,7 +203,7 @@ export default function RespondPage() {
             onClick={() => submit('declined')}
             type="button"
           >
-            {submittingChoice === 'declined' ? 'Submitting…' : 'Can’t make it'}
+            {submittingChoice === 'declined' ? 'Submitting...' : "Can't make it"}
           </button>
         </div>
 
