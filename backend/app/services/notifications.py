@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import json
+import smtplib
+from dataclasses import dataclass
+from email.message import EmailMessage
+from pathlib import Path
+from typing import Literal
+
+from app.core.config import settings
+
+
+Channel = Literal["email", "sms"]
+
+
+@dataclass
+class DeliveryResult:
+    status: str
+    detail: str | None = None
+
+
+def send_notification(
+    *,
+    channel: Channel,
+    target: str,
+    subject: str,
+    body: str,
+    metadata: dict[str, object] | None = None,
+) -> DeliveryResult:
+    if channel == "sms":
+        return _write_outbox(channel=channel, target=target, subject=subject, body=body, metadata=metadata)
+
+    mode = settings.notification_mode.lower()
+    if mode == "smtp":
+        return _send_email_via_smtp(target=target, subject=subject, body=body)
+    return _write_outbox(channel=channel, target=target, subject=subject, body=body, metadata=metadata)
+
+
+def _send_email_via_smtp(*, target: str, subject: str, body: str) -> DeliveryResult:
+    if not settings.smtp_host:
+        return DeliveryResult(status="failed", detail="smtp_host_not_configured")
+
+    message = EmailMessage()
+    message["From"] = settings.notification_from_email
+    message["To"] = target
+    message["Subject"] = subject
+    message.set_content(body)
+
+    try:
+        if settings.smtp_use_ssl:
+            with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port) as server:
+                _login_and_send(server, message)
+        else:
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
+                if settings.smtp_use_tls:
+                    server.starttls()
+                _login_and_send(server, message)
+    except Exception as exc:  # pragma: no cover - integration path
+        return DeliveryResult(status="failed", detail=str(exc))
+
+    return DeliveryResult(status="sent")
+
+
+def _login_and_send(server: smtplib.SMTP, message: EmailMessage) -> None:
+    if settings.smtp_username and settings.smtp_password:
+        server.login(settings.smtp_username, settings.smtp_password)
+    server.send_message(message)
+
+
+def _write_outbox(
+    *,
+    channel: str,
+    target: str,
+    subject: str,
+    body: str,
+    metadata: dict[str, object] | None = None,
+) -> DeliveryResult:
+    outbox_dir = Path(settings.notification_outbox_dir)
+    if not outbox_dir.is_absolute():
+        outbox_dir = Path.cwd() / outbox_dir
+    outbox_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_target = "".join(ch if ch.isalnum() else "_" for ch in target)[:60] or "unknown"
+    filename = outbox_dir / f"{channel}_{safe_target}_{subject[:32].replace(' ', '_')}.json"
+    payload = {
+        "channel": channel,
+        "target": target,
+        "subject": subject,
+        "body": body,
+        "metadata": metadata or {},
+    }
+    filename.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return DeliveryResult(status="sent", detail=str(filename))

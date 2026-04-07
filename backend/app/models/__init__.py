@@ -10,5 +10,6 @@ from .profile import Profile
 from .proposal import Proposal
 from .proposal_response import ProposalResponse
 from .provider_calendar import ProviderCalendar
+from .reminder_log import ReminderLog
 from .scheduled_event import ScheduledEvent
 from .share_link import ShareLink

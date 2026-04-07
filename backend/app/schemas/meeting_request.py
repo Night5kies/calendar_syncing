@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 class MeetingRequestCreate(BaseModel):
@@ -9,6 +11,8 @@ class MeetingRequestCreate(BaseModel):
     location: str | None = None
     video_link: str | None = None
     notes: str | None = None
+    response_deadline: datetime | None = None
+    reminders_enabled: bool = True
 
 
 class ProposalCreate(BaseModel):

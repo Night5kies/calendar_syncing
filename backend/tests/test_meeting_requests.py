@@ -1,14 +1,19 @@
 import unittest
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
+from app.services.confirmation_artifacts import artifact_filename, build_ics_body, ensure_artifact_dir
 from app.schemas.proposal_response import ProposalResponseCreate
 from app.services.meeting_requests import (
     MAX_MANUAL_PROPOSALS,
+    build_reminder_copy,
     can_edit_proposals,
     compute_end_at,
     next_status_on_response,
+    reminder_target_for_participant,
     scheduled_event_snapshot,
     validate_manual_proposal_rules,
 )
@@ -55,6 +60,40 @@ class MeetingRequestTests(unittest.TestCase):
         start_at = datetime(2026, 1, 6, 12, 0, tzinfo=timezone.utc)
         end_at = compute_end_at(start_at, 45)
         self.assertEqual(end_at, datetime(2026, 1, 6, 12, 45, tzinfo=timezone.utc))
+
+    def test_reminder_helpers(self) -> None:
+        meeting_request = SimpleNamespace(
+            title="Dinner",
+            response_deadline=datetime(2026, 1, 7, 1, 0, tzinfo=timezone.utc),
+        )
+        participant = SimpleNamespace(
+            display_name="Alex",
+            email="alex@example.com",
+            phone=None,
+        )
+        self.assertEqual(reminder_target_for_participant(participant), ("email", "alex@example.com"))
+        message = build_reminder_copy(meeting_request, participant, "deadline")
+        self.assertIn("Dinner", message)
+        self.assertIn("Final reminder.", message)
+
+    def test_confirmation_artifact_helpers(self) -> None:
+        ics = build_ics_body(
+            uid="event-1@syzy",
+            title="Dinner",
+            start_at_utc="20260106T120000Z",
+            end_at_utc="20260106T130000Z",
+            description="Bring notes",
+            location="Cafe",
+            organizer_email="organizer@example.com",
+        )
+        self.assertIn("BEGIN:VCALENDAR", ics)
+        self.assertIn("SUMMARY:Dinner", ics)
+        self.assertIn("LOCATION:Cafe", ics)
+        self.assertTrue(artifact_filename("Dinner Plan", "abc").endswith(".ics"))
+
+        with TemporaryDirectory() as temp_dir:
+            ensured = ensure_artifact_dir(temp_dir)
+            self.assertTrue(Path(ensured).exists())
 
     def test_manual_proposal_rules(self) -> None:
         self.assertTrue(can_edit_proposals("draft"))

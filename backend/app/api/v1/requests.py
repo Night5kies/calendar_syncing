@@ -2,25 +2,31 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_current_user
+from app.core.config import settings
 from app.db.deps import get_db
 from app.models.meeting_request import MeetingRequest
 from app.models.participant import Participant
 from app.models.proposal import Proposal
 from app.models.proposal_response import ProposalResponse
+from app.models.reminder_log import ReminderLog
 from app.models.scheduled_event import ScheduledEvent
 from app.models.share_link import ShareLink
 from app.schemas.meeting_request import MeetingRequestCreate, ParticipantCreate, ProposalCreate
 from app.schemas.proposal_response import ProposalResponseCreate, RequestFinalize
 from app.services.meeting_requests import (
     compute_end_at,
+    dispatch_request_reminders,
+    get_outstanding_participants,
     next_status_on_response,
     scheduled_event_snapshot,
     validate_manual_proposal_rules,
 )
+from app.services.scheduled_events import finalize_scheduled_event
 
 router = APIRouter()
 
@@ -41,6 +47,8 @@ def create_request(
         location=payload.location,
         video_link=payload.video_link,
         notes=payload.notes,
+        response_deadline=payload.response_deadline,
+        reminders_enabled=payload.reminders_enabled,
         status="draft",
     )
     db.add(req)
@@ -78,8 +86,20 @@ def get_request(
         .scalars()
         .all()
     )
+    reminder_logs = (
+        db.execute(
+            select(ReminderLog)
+            .where(ReminderLog.meeting_request_id == request_id)
+            .order_by(ReminderLog.created_at.desc())
+        )
+        .scalars()
+        .all()
+    )
     share_link = db.execute(
         select(ShareLink).where(ShareLink.meeting_request_id == request_id).order_by(ShareLink.created_at.desc())
+    ).scalar_one_or_none()
+    scheduled = db.execute(
+        select(ScheduledEvent).where(ScheduledEvent.meeting_request_id == request_id)
     ).scalar_one_or_none()
 
     tallies: dict[str, dict[str, int]] = {
@@ -153,11 +173,49 @@ def get_request(
             "unassigned_maybe_count": unassigned_maybe,
         },
         "tallies": tallies,
+        "reminders": {
+            "enabled": req.reminders_enabled,
+            "response_deadline": req.response_deadline.isoformat() if req.response_deadline else None,
+            "last_reminded_at": req.last_reminded_at.isoformat() if req.last_reminded_at else None,
+            "sent_count": req.reminder_count,
+            "history": [
+                {
+                    "id": str(log.id),
+                    "participant_id": str(log.participant_id),
+                    "channel": log.channel,
+                    "reason": log.reason,
+                    "status": log.status,
+                    "target": log.target,
+                    "created_at": log.created_at.isoformat() if log.created_at else None,
+                }
+                for log in reminder_logs[:10]
+            ],
+        },
+        "outstanding_participants": [
+            {
+                "id": str(participant.id),
+                "display_name": participant.display_name,
+                "email": participant.email,
+                "phone": participant.phone,
+            }
+            for participant in get_outstanding_participants(db, request_id)
+        ],
         "share": {
             "token": share_link.token,
             "url": f"/v1/share/public/{share_link.token}",
         }
         if share_link
+        else None,
+        "confirmed_event": {
+            "id": str(scheduled.id),
+            "provider": scheduled.provider,
+            "provider_event_id": scheduled.provider_event_id,
+            "artifact_uid": scheduled.artifact_uid,
+            "artifact_url": f"{settings.api_base_url}/v1/requests/{request_id}/artifact.ics"
+            if scheduled.artifact_path
+            else None,
+        }
+        if scheduled
         else None,
         "created_at": req.created_at.isoformat() if req.created_at else None,
     }
@@ -306,7 +364,6 @@ def finalize_request(
     proposal = db.get(Proposal, payload.proposal_id)
     if not proposal or proposal.meeting_request_id != request_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
-
     snapshot = scheduled_event_snapshot(req, proposal)
     scheduled = db.execute(
         select(ScheduledEvent).where(ScheduledEvent.meeting_request_id == request_id)
@@ -326,5 +383,49 @@ def finalize_request(
         db.add(scheduled)
 
     req.status = "confirmed"
+    finalize_scheduled_event(
+        db,
+        scheduled_event=scheduled,
+        organizer_email=current_user.email,
+        organizer_id=current_user.user_id,
+    )
     db.commit()
     return {"id": str(scheduled.id)}
+
+
+@router.post("/{request_id}/reminders/ping")
+def ping_non_responders(
+    request_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    req = db.get(MeetingRequest, request_id)
+    if not req or req.organizer_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+
+    result = dispatch_request_reminders(db, req, reason="manual_ping")
+    db.commit()
+    return result
+
+
+@router.get("/{request_id}/artifact.ics")
+def download_confirmation_artifact(
+    request_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    req = db.get(MeetingRequest, request_id)
+    if not req or req.organizer_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+
+    scheduled = db.execute(
+        select(ScheduledEvent).where(ScheduledEvent.meeting_request_id == request_id)
+    ).scalar_one_or_none()
+    if not scheduled or not scheduled.artifact_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
+
+    return FileResponse(
+        scheduled.artifact_path,
+        media_type="text/calendar",
+        filename=f"{req.title}.ics",
+    )
