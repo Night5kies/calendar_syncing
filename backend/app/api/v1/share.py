@@ -15,6 +15,7 @@ from app.models.meeting_request import MeetingRequest
 from app.models.participant import Participant
 from app.models.proposal import Proposal
 from app.models.proposal_response import ProposalResponse
+from app.models.scheduled_event import ScheduledEvent
 from app.services.meeting_requests import compute_end_at, next_status_on_response
 from app.services.participants import (
     ParticipantResolutionError,
@@ -79,6 +80,33 @@ def get_share(token: str, db: Session = Depends(get_db)):
         .scalars()
         .all()
     )
+    scheduled = db.execute(
+        select(ScheduledEvent).where(ScheduledEvent.meeting_request_id == req.id)
+    ).scalar_one_or_none()
+    confirmed_payload = None
+    if scheduled is not None:
+        end_at = (
+            compute_end_at(scheduled.start_at, scheduled.duration_min).isoformat()
+            if scheduled.start_at
+            else None
+        )
+        confirmed_payload = {
+            "id": str(scheduled.id),
+            "proposal_id": str(scheduled.proposal_id),
+            "title": scheduled.title,
+            "timezone": scheduled.timezone,
+            "start_at": scheduled.start_at.isoformat() if scheduled.start_at else None,
+            "end_at": end_at,
+            "duration_min": scheduled.duration_min,
+            "location": scheduled.location,
+            "video_link": scheduled.video_link,
+            "notes": scheduled.notes,
+            "artifact_url": (
+                f"{settings.api_base_url}/v1/events/{req.id}/artifact.ics"
+                if scheduled.artifact_path
+                else None
+            ),
+        }
     return {
         "request": {
             "id": str(req.id),
@@ -101,7 +129,8 @@ def get_share(token: str, db: Session = Depends(get_db)):
                 }
                 for proposal in proposals
             ],
-        }
+        },
+        "confirmed_event": confirmed_payload,
     }
 
 

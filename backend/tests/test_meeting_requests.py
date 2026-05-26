@@ -107,6 +107,52 @@ class MeetingRequestTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_manual_proposal_rules("draft", MAX_MANUAL_PROPOSALS)
 
+    def test_confirmed_event_payload_shape(self) -> None:
+        from app.api.v1.events import _confirmed_event_payload
+
+        req = SimpleNamespace(id=uuid.UUID("22222222-2222-2222-2222-222222222222"))
+        self.assertIsNone(_confirmed_event_payload(req, None))
+
+        start_at = datetime(2026, 1, 6, 23, 0, tzinfo=timezone.utc)
+        scheduled = SimpleNamespace(
+            id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+            proposal_id=uuid.UUID("44444444-4444-4444-4444-444444444444"),
+            title="Dinner",
+            timezone="America/New_York",
+            start_at=start_at,
+            duration_min=75,
+            location="Joe's",
+            video_link=None,
+            notes=None,
+            artifact_path="/tmp/dinner.ics",
+        )
+        payload = _confirmed_event_payload(req, scheduled)
+        assert payload is not None
+        self.assertEqual(payload["id"], str(scheduled.id))
+        self.assertEqual(payload["proposal_id"], str(scheduled.proposal_id))
+        self.assertEqual(payload["timezone"], "America/New_York")
+        self.assertEqual(payload["duration_min"], 75)
+        self.assertEqual(payload["location"], "Joe's")
+        self.assertEqual(payload["start_at"], start_at.isoformat())
+        self.assertEqual(payload["end_at"], compute_end_at(start_at, 75).isoformat())
+        self.assertTrue(payload["artifact_url"].endswith(f"/v1/events/{req.id}/artifact.ics"))
+
+        scheduled_no_artifact = SimpleNamespace(
+            id=uuid.UUID("55555555-5555-5555-5555-555555555555"),
+            proposal_id=uuid.UUID("66666666-6666-6666-6666-666666666666"),
+            title="Coffee",
+            timezone="UTC",
+            start_at=start_at,
+            duration_min=30,
+            location=None,
+            video_link=None,
+            notes=None,
+            artifact_path=None,
+        )
+        payload_no_artifact = _confirmed_event_payload(req, scheduled_no_artifact)
+        assert payload_no_artifact is not None
+        self.assertIsNone(payload_no_artifact["artifact_url"])
+
 
 if __name__ == "__main__":
     unittest.main()

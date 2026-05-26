@@ -2,15 +2,18 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.deps import get_db
 from app.models.meeting_request import MeetingRequest
 from app.models.participant import Participant
 from app.models.proposal import Proposal
 from app.models.proposal_response import ProposalResponse
+from app.models.scheduled_event import ScheduledEvent
 from app.services.meeting_requests import compute_end_at, next_status_on_response
 from app.services.participants import (
     ParticipantResolutionError,
@@ -59,6 +62,35 @@ def _event_payload(req: MeetingRequest, proposals: list[Proposal]) -> dict:
     }
 
 
+def _confirmed_event_payload(
+    req: MeetingRequest, scheduled: ScheduledEvent | None
+) -> dict | None:
+    if scheduled is None:
+        return None
+    end_at = (
+        compute_end_at(scheduled.start_at, scheduled.duration_min).isoformat()
+        if scheduled.start_at
+        else None
+    )
+    return {
+        "id": str(scheduled.id),
+        "proposal_id": str(scheduled.proposal_id),
+        "title": scheduled.title,
+        "timezone": scheduled.timezone,
+        "start_at": scheduled.start_at.isoformat() if scheduled.start_at else None,
+        "end_at": end_at,
+        "duration_min": scheduled.duration_min,
+        "location": scheduled.location,
+        "video_link": scheduled.video_link,
+        "notes": scheduled.notes,
+        "artifact_url": (
+            f"{settings.api_base_url}/v1/events/{req.id}/artifact.ics"
+            if scheduled.artifact_path
+            else None
+        ),
+    }
+
+
 @router.get("/{event_id}/respond")
 def get_event_respond_context(
     event_id: uuid.UUID,
@@ -88,7 +120,14 @@ def get_event_respond_context(
             )
         ).scalar_one_or_none()
 
-    response: dict = {"event": _event_payload(req, proposals)}
+    scheduled = db.execute(
+        select(ScheduledEvent).where(ScheduledEvent.meeting_request_id == event_id)
+    ).scalar_one_or_none()
+
+    response: dict = {
+        "event": _event_payload(req, proposals),
+        "confirmed_event": _confirmed_event_payload(req, scheduled),
+    }
 
     if invited_participant is not None:
         existing_response = db.execute(
@@ -200,3 +239,31 @@ def submit_event_response(
         "proposal_id": str(payload.proposal_id) if payload.proposal_id else None,
         "invite_url": build_invite_url(event_id, participant.invite_token),
     }
+
+
+@router.get("/{event_id}/artifact.ics")
+def download_event_artifact(
+    event_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    """Public ICS download for attendees of a confirmed event.
+
+    Only resolves once the event is confirmed and the artifact has been
+    written. Returns 404 otherwise so a half-finished event never leaks
+    its calendar metadata.
+    """
+    req = db.get(MeetingRequest, event_id)
+    if not req or req.status != "confirmed":
+        raise HTTPException(status_code=404, detail="event not confirmed")
+
+    scheduled = db.execute(
+        select(ScheduledEvent).where(ScheduledEvent.meeting_request_id == event_id)
+    ).scalar_one_or_none()
+    if not scheduled or not scheduled.artifact_path:
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    return FileResponse(
+        scheduled.artifact_path,
+        media_type="text/calendar",
+        filename=f"{req.title}.ics",
+    )
