@@ -8,9 +8,22 @@ import {
   finalizeRequest,
   getOrganizerRequest,
   pingNonResponders,
+  updateReminderSettings,
   type OrganizerRequestDetail,
 } from '../../../lib/api';
 import { formatDateTime, formatRange } from '../../../lib/types';
+
+function toLocalDateTimeInput(iso: string | null) {
+  if (!iso) {
+    return '';
+  }
+
+  const date = new Date(iso);
+  const pad = (value: number) => value.toString().padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+}
 
 export default function RequestDetailPage() {
   const params = useParams<{ id: string }>();
@@ -21,6 +34,9 @@ export default function RequestDetailPage() {
   const [loadingProposalId, setLoadingProposalId] = useState<string | null>(null);
   const [pingMessage, setPingMessage] = useState<string | null>(null);
   const [isPinging, setIsPinging] = useState(false);
+  const [remindersEnabledDraft, setRemindersEnabledDraft] = useState(true);
+  const [deadlineDraft, setDeadlineDraft] = useState('');
+  const [isSavingReminders, setIsSavingReminders] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,12 +60,19 @@ export default function RequestDetailPage() {
     };
   }, [requestId]);
 
+  useEffect(() => {
+    if (!request) {
+      return;
+    }
+    setRemindersEnabledDraft(request.reminders.enabled);
+    setDeadlineDraft(toLocalDateTimeInput(request.reminders.response_deadline));
+  }, [request]);
+
   async function copySharePath() {
     if (!request?.share) {
       return;
     }
-    const sharePath = `/respond/${request.share.token}`;
-    await navigator.clipboard.writeText(sharePath);
+    await navigator.clipboard.writeText(request.share.url);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
   }
@@ -64,6 +87,25 @@ export default function RequestDetailPage() {
       setError(confirmError instanceof Error ? confirmError.message : 'Unable to confirm option.');
     } finally {
       setLoadingProposalId(null);
+    }
+  }
+
+  async function saveReminderState() {
+    setError(null);
+    setPingMessage(null);
+    setIsSavingReminders(true);
+    try {
+      await updateReminderSettings(requestId, {
+        reminders_enabled: remindersEnabledDraft,
+        response_deadline: deadlineDraft ? new Date(deadlineDraft).toISOString() : null,
+      });
+      const next = await getOrganizerRequest(requestId);
+      setRequest(next);
+      setPingMessage('Reminder settings saved.');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Unable to save reminder settings.');
+    } finally {
+      setIsSavingReminders(false);
     }
   }
 
@@ -110,7 +152,10 @@ export default function RequestDetailPage() {
     );
   }
 
-  const sharePath = request.share ? `/respond/${request.share.token}` : null;
+  const shareUrl = request.share?.url ?? null;
+  const confirmedOption = request.confirmed_event
+    ? request.proposals.find((proposal) => proposal.id === request.confirmed_event?.proposal_id) ?? null
+    : null;
 
   return (
     <main className="shell shell-narrow">
@@ -121,37 +166,59 @@ export default function RequestDetailPage() {
           {request.duration_min} min - {request.timezone}
           {request.event_type ? ` - ${request.event_type}` : ''}
         </p>
+        {request.location || request.video_link ? (
+          <p className="helper-copy">
+            {request.location ? <span>{request.location}</span> : null}
+            {request.location && request.video_link ? <span> - </span> : null}
+            {request.video_link ? (
+              <a href={request.video_link} rel="noreferrer" target="_blank">
+                {request.video_link}
+              </a>
+            ) : null}
+          </p>
+        ) : null}
       </div>
 
       <section className="grid-two">
         <article className="panel">
           <p className="section-label">Participants</p>
-          <div className="chip-wrap">
+          <ul className="stack-form" style={{ gap: '0.5rem' }}>
             {request.participants.map((participant) => (
-              <span className="chip" key={participant.id}>
-                {participant.display_name ?? participant.email ?? participant.phone ?? 'Guest'}
-              </span>
+              <li key={participant.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <strong>
+                  {participant.display_name ?? participant.email ?? participant.phone ?? 'Guest'}
+                  {participant.status === 'responded' ? ' ✓' : ''}
+                </strong>
+                {participant.invite_url ? (
+                  <code style={{ fontSize: '0.75rem', wordBreak: 'break-all' }}>
+                    {participant.invite_url}
+                  </code>
+                ) : null}
+              </li>
             ))}
-          </div>
+          </ul>
           <p className="helper-copy">
             {request.progress.responded_count}/{request.progress.participant_count} responded -{' '}
             {request.progress.outstanding_count} outstanding
+          </p>
+          <p className="helper-copy">
+            Each invitee has a private link above. Reminders send each person their own link.
           </p>
           {request.notes ? <p className="helper-copy">{request.notes}</p> : null}
         </article>
 
         <article className="panel">
           <p className="section-label">Share</p>
-          {sharePath ? (
+          {shareUrl ? (
             <>
               <div className="share-row">
-                <code>{sharePath}</code>
+                <code>{shareUrl}</code>
                 <button className="button button-secondary" onClick={copySharePath} type="button">
                   {copied ? 'Copied' : 'Copy'}
                 </button>
               </div>
               <div className="button-group">
-                <Link className="button button-primary" href={sharePath}>
+                <Link className="button button-primary" href={shareUrl}>
                   Preview attendee page
                 </Link>
               </div>
@@ -194,6 +261,37 @@ export default function RequestDetailPage() {
             <span>Total queued reminders</span>
             <strong>{request.reminders.sent_count}</strong>
           </div>
+        </div>
+        <div className="field-grid">
+          <div className="field field-checkbox">
+            <span>Reminder policy</span>
+            <label className="checkbox-row">
+              <input
+                checked={remindersEnabledDraft}
+                onChange={(event) => setRemindersEnabledDraft(event.target.checked)}
+                type="checkbox"
+              />
+              <span>Enable reminders for outstanding participants</span>
+            </label>
+          </div>
+          <label className="field">
+            <span>Response deadline</span>
+            <input
+              type="datetime-local"
+              value={deadlineDraft}
+              onChange={(event) => setDeadlineDraft(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="button-group">
+          <button
+            className="button button-secondary"
+            disabled={isSavingReminders}
+            onClick={saveReminderState}
+            type="button"
+          >
+            {isSavingReminders ? 'Saving...' : 'Save reminder settings'}
+          </button>
         </div>
         {request.outstanding_participants.length > 0 ? (
           <p className="helper-copy">
@@ -258,6 +356,14 @@ export default function RequestDetailPage() {
           </div>
           <div className="flat-list">
             <div className="stat-row">
+              <span>Winning option</span>
+              <strong>
+                {confirmedOption
+                  ? formatRange(confirmedOption.start_at, confirmedOption.end_at, request.timezone)
+                  : formatDateTime(request.confirmed_event.start_at, request.timezone)}
+              </strong>
+            </div>
+            <div className="stat-row">
               <span>Calendar write-back</span>
               <strong>
                 {request.confirmed_event.provider
@@ -270,6 +376,10 @@ export default function RequestDetailPage() {
               <strong>{request.confirmed_event.provider_event_id ?? 'Unavailable'}</strong>
             </div>
           </div>
+          <p className="helper-copy">
+            The request is confirmed. Share the final time back into the chat and send the ICS if
+            anyone wants a calendar-safe artifact.
+          </p>
           {request.confirmed_event.artifact_url ? (
             <div className="button-group">
               <a

@@ -23,6 +23,8 @@ export type OrganizerRequestDetail = {
   duration_min: number;
   timezone: string;
   event_type: string | null;
+  location: string | null;
+  video_link: string | null;
   notes: string | null;
   status: string;
   proposals: Array<{
@@ -38,7 +40,9 @@ export type OrganizerRequestDetail = {
     email: string | null;
     phone: string | null;
     status: string;
+    source: string;
     responded_at: string | null;
+    invite_url: string | null;
   }>;
   progress: {
     responded_count: number;
@@ -79,12 +83,18 @@ export type OrganizerRequestDetail = {
   share: {
     token: string;
     url: string;
+    legacy_url?: string;
   } | null;
   confirmed_event: {
     id: string;
+    proposal_id: string;
     provider: string | null;
     provider_event_id: string | null;
     artifact_uid: string | null;
+    title: string;
+    start_at: string | null;
+    end_at: string | null;
+    timezone: string;
     artifact_url: string | null;
   } | null;
 };
@@ -110,11 +120,60 @@ export type PublicSharePayload = {
   };
 };
 
+export type EventRespondContext = {
+  event: {
+    id: string;
+    title: string;
+    duration_min: number;
+    timezone: string;
+    event_type: string | null;
+    location: string | null;
+    video_link: string | null;
+    notes: string | null;
+    status: string;
+    proposals: Array<{
+      id: string;
+      rank: number;
+      start_at: string;
+      end_at: string;
+      score: number | null;
+    }>;
+  };
+  invited_as?: {
+    id: string;
+    display_name: string | null;
+    email: string | null;
+    status: string;
+    current_response: {
+      proposal_id: string | null;
+      choice: 'picked' | 'maybe' | 'declined' | null;
+      comment: string | null;
+    } | null;
+  };
+};
+
+export type EventRespondResult =
+  | {
+      ok: true;
+      status: 'saved';
+      participant_id: string;
+      choice: 'picked' | 'maybe' | 'declined';
+      proposal_id: string | null;
+      invite_url: string;
+    }
+  | {
+      status: 'check_email';
+      message: string;
+      delivery_status: string;
+    };
+
 export async function createRequest(payload: {
   title: string;
   duration_min: number;
   timezone: string;
   event_type: string | null;
+  location?: string | null;
+  video_link?: string | null;
   notes: string | null;
   response_deadline: string | null;
   reminders_enabled: boolean;
@@ -173,6 +232,22 @@ export async function pingNonResponders(requestId: string) {
   });
 }
 
+export async function updateReminderSettings(
+  requestId: string,
+  payload: {
+    reminders_enabled?: boolean;
+    response_deadline?: string | null;
+  },
+) {
+  return request<{
+    reminders_enabled: boolean;
+    response_deadline: string | null;
+  }>(`/v1/requests/${requestId}/reminders`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getPublicShare(token: string) {
   return request<PublicSharePayload>(`/v1/share/public/${token}`);
 }
@@ -190,6 +265,29 @@ export async function submitPublicResponse(
   },
 ) {
   return request<{ ok: boolean }>(`/v1/share/public/${token}/responses`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getEventResponseContext(eventId: string, inviteToken?: string | null) {
+  const query = inviteToken ? `?token=${encodeURIComponent(inviteToken)}` : '';
+  return request<EventRespondContext>(`/v1/events/${eventId}/respond${query}`);
+}
+
+export async function submitEventResponse(
+  eventId: string,
+  payload: {
+    display_name?: string;
+    email?: string;
+    phone?: string;
+    proposal_id: string | null;
+    choice: 'picked' | 'maybe' | 'declined';
+    comment?: string;
+    invite_token?: string;
+  },
+) {
+  return request<EventRespondResult>(`/v1/events/${eventId}/responses`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });

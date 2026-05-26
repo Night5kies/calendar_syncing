@@ -304,6 +304,53 @@ select {
   padding: 0;
 }
 
+.template-chip-row {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.template-chip {
+  display: grid;
+  gap: 0.35rem;
+  min-height: 4.5rem;
+  padding: 0.95rem 1rem;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: white;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.template-chip:hover {
+  transform: translateY(-1px);
+}
+
+.template-chip-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.template-chip-label {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+
+.template-chip-helper {
+  font-family: 'Courier New', monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .error-text {
   color: #a52424;
   margin: 0;
@@ -331,7 +378,17 @@ code {
     align-items: stretch;
   }
 
+  .template-chip-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .hero h1 {
     max-width: none;
+  }
+}
+
+@media (max-width: 460px) {
+  .template-chip-row {
+    grid-template-columns: 1fr;
   }
 }
