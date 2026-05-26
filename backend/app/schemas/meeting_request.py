@@ -1,6 +1,13 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+class ReminderPolicyPayload(BaseModel):
+    initial_hours: int | None = Field(default=None, ge=1, le=720)
+    followup_hours: int | None = Field(default=None, ge=1, le=720)
+    max_per_participant: int | None = Field(default=None, ge=1, le=10)
+
 
 class MeetingRequestCreate(BaseModel):
     title: str
@@ -13,6 +20,7 @@ class MeetingRequestCreate(BaseModel):
     notes: str | None = None
     response_deadline: datetime | None = None
     reminders_enabled: bool = True
+    reminder_policy: ReminderPolicyPayload | None = None
 
 
 class ProposalCreate(BaseModel):
@@ -32,3 +40,20 @@ class ParticipantCreate(BaseModel):
 class ReminderSettingsUpdate(BaseModel):
     reminders_enabled: bool | None = None
     response_deadline: datetime | None = None
+    reminder_policy: ReminderPolicyPayload | None = None
+
+
+class SlotWindowPayload(BaseModel):
+    start_minute: int = Field(ge=0, lt=1440)
+    end_minute: int = Field(gt=0, le=1440)
+
+
+class SuggestRequestPayload(BaseModel):
+    start_date: str
+    end_date: str
+    days_of_week: list[int] | None = None
+    time_windows: list[SlotWindowPayload] | None = None
+    exclude_dates: list[str] | None = None
+    limit: int = Field(default=5, ge=1, le=10)
+    replace_existing: bool = True
+    mode: Literal["suggest", "preview"] = "suggest"

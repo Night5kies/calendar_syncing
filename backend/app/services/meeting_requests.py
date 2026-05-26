@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import Select, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.meeting_request import MeetingRequest
@@ -13,6 +14,20 @@ from app.services.participants import build_invite_url
 
 MAX_MANUAL_PROPOSALS = 5
 MAX_REMINDERS_PER_PARTICIPANT = 3
+DEFAULT_INITIAL_REMINDER_HOURS = 12
+DEFAULT_FOLLOWUP_REMINDER_HOURS = 24
+
+
+def resolve_reminder_policy(meeting_request: MeetingRequest) -> dict[str, int]:
+    policy = meeting_request.reminder_policy or {}
+    initial_hours = policy.get("initial_hours")
+    followup_hours = policy.get("followup_hours")
+    max_per_participant = policy.get("max_per_participant")
+    return {
+        "initial_hours": int(initial_hours) if isinstance(initial_hours, (int, float)) and initial_hours > 0 else DEFAULT_INITIAL_REMINDER_HOURS,
+        "followup_hours": int(followup_hours) if isinstance(followup_hours, (int, float)) and followup_hours > 0 else DEFAULT_FOLLOWUP_REMINDER_HOURS,
+        "max_per_participant": int(max_per_participant) if isinstance(max_per_participant, (int, float)) and max_per_participant > 0 else MAX_REMINDERS_PER_PARTICIPANT,
+    }
 
 
 def compute_end_at(start_at: datetime, duration_min: int) -> datetime:
@@ -109,6 +124,8 @@ def dispatch_request_reminders(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
+    policy = resolve_reminder_policy(meeting_request)
+    max_per_participant = policy["max_per_participant"]
     outstanding_participants = get_outstanding_participants(db, meeting_request.id)
 
     sent_logs: list[ReminderLog] = []
@@ -127,10 +144,11 @@ def dispatch_request_reminders(
                 ReminderLog.participant_id == participant.id,
             )
         ).scalar_one()
-        if existing_count >= MAX_REMINDERS_PER_PARTICIPANT:
+        if existing_count >= max_per_participant:
             skipped += 1
             continue
 
+        next_sequence = int(existing_count) + 1
         channel, address = target
         body = build_reminder_copy(meeting_request, participant, reason)
         delivery = send_notification(
@@ -138,19 +156,29 @@ def dispatch_request_reminders(
             target=address,
             subject=build_reminder_subject(meeting_request),
             body=body,
-            metadata={"meeting_request_id": str(meeting_request.id), "participant_id": str(participant.id)},
+            metadata={
+                "meeting_request_id": str(meeting_request.id),
+                "participant_id": str(participant.id),
+                "reminder_sequence": next_sequence,
+            },
         )
-        sent_logs.append(
-            ReminderLog(
-                meeting_request_id=meeting_request.id,
-                participant_id=participant.id,
-                channel=channel,
-                reason=reason,
-                status=delivery.status,
-                target=address,
-            )
+        log = ReminderLog(
+            meeting_request_id=meeting_request.id,
+            participant_id=participant.id,
+            channel=channel,
+            reason=reason,
+            reminder_sequence=next_sequence,
+            status=delivery.status,
+            target=address,
         )
-        db.add(sent_logs[-1])
+        db.add(log)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            skipped += 1
+            continue
+        sent_logs.append(log)
 
     if sent_logs:
         meeting_request.last_reminded_at = now
@@ -160,6 +188,7 @@ def dispatch_request_reminders(
         "sent_count": len(sent_logs),
         "skipped_count": skipped,
         "outstanding_count": len(outstanding_participants),
+        "policy": policy,
         "message_preview": [
             build_reminder_copy(meeting_request, participant, reason)
             for participant in outstanding_participants[:3]
@@ -169,7 +198,7 @@ def dispatch_request_reminders(
 
 def due_requests_stmt(now: datetime | None = None) -> Select[tuple[MeetingRequest]]:
     now = now or datetime.now(timezone.utc)
-    first_reminder_cutoff = now - timedelta(hours=12)
+    first_reminder_cutoff = now - timedelta(hours=DEFAULT_INITIAL_REMINDER_HOURS)
     return select(MeetingRequest).where(
         MeetingRequest.reminders_enabled.is_(True),
         MeetingRequest.status.in_(("sent", "collecting", "needs_organizer_confirm")),

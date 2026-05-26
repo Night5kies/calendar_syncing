@@ -8,12 +8,16 @@ from types import SimpleNamespace
 from app.services.confirmation_artifacts import artifact_filename, build_ics_body, ensure_artifact_dir
 from app.schemas.proposal_response import ProposalResponseCreate
 from app.services.meeting_requests import (
+    DEFAULT_FOLLOWUP_REMINDER_HOURS,
+    DEFAULT_INITIAL_REMINDER_HOURS,
     MAX_MANUAL_PROPOSALS,
+    MAX_REMINDERS_PER_PARTICIPANT,
     build_reminder_copy,
     can_edit_proposals,
     compute_end_at,
     next_status_on_response,
     reminder_target_for_participant,
+    resolve_reminder_policy,
     scheduled_event_snapshot,
     validate_manual_proposal_rules,
 )
@@ -97,6 +101,30 @@ class MeetingRequestTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             ensured = ensure_artifact_dir(temp_dir)
             self.assertTrue(Path(ensured).exists())
+
+    def test_resolve_reminder_policy_uses_defaults(self) -> None:
+        req = SimpleNamespace(reminder_policy=None)
+        policy = resolve_reminder_policy(req)
+        self.assertEqual(policy["initial_hours"], DEFAULT_INITIAL_REMINDER_HOURS)
+        self.assertEqual(policy["followup_hours"], DEFAULT_FOLLOWUP_REMINDER_HOURS)
+        self.assertEqual(policy["max_per_participant"], MAX_REMINDERS_PER_PARTICIPANT)
+
+    def test_resolve_reminder_policy_honors_overrides(self) -> None:
+        req = SimpleNamespace(
+            reminder_policy={"initial_hours": 4, "followup_hours": 8, "max_per_participant": 5}
+        )
+        policy = resolve_reminder_policy(req)
+        self.assertEqual(policy["initial_hours"], 4)
+        self.assertEqual(policy["followup_hours"], 8)
+        self.assertEqual(policy["max_per_participant"], 5)
+
+    def test_resolve_reminder_policy_falls_back_on_invalid(self) -> None:
+        req = SimpleNamespace(
+            reminder_policy={"initial_hours": -3, "max_per_participant": 0}
+        )
+        policy = resolve_reminder_policy(req)
+        self.assertEqual(policy["initial_hours"], DEFAULT_INITIAL_REMINDER_HOURS)
+        self.assertEqual(policy["max_per_participant"], MAX_REMINDERS_PER_PARTICIPANT)
 
     def test_manual_proposal_rules(self) -> None:
         self.assertTrue(can_edit_proposals("draft"))

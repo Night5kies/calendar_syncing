@@ -21,15 +21,24 @@ from app.schemas.meeting_request import (
     ParticipantCreate,
     ProposalCreate,
     ReminderSettingsUpdate,
+    SuggestRequestPayload,
 )
 from app.schemas.proposal_response import ProposalResponseCreate, RequestFinalize
 from app.services.meeting_requests import (
+    can_edit_proposals,
     compute_end_at,
     dispatch_request_reminders,
     get_outstanding_participants,
     next_status_on_response,
+    resolve_reminder_policy,
     scheduled_event_snapshot,
     validate_manual_proposal_rules,
+)
+from app.services.scheduling import (
+    generate_suggestions,
+    load_organizer_constraints,
+    materialize_suggestions,
+    parse_inputs_from_payload,
 )
 from app.services.participants import (
     build_invite_url,
@@ -60,6 +69,11 @@ def create_request(
         notes=payload.notes,
         response_deadline=payload.response_deadline,
         reminders_enabled=payload.reminders_enabled,
+        reminder_policy=(
+            payload.reminder_policy.model_dump(exclude_none=True)
+            if payload.reminder_policy is not None
+            else None
+        ),
         status="draft",
     )
     db.add(req)
@@ -193,17 +207,19 @@ def get_request(
             "response_deadline": req.response_deadline.isoformat() if req.response_deadline else None,
             "last_reminded_at": req.last_reminded_at.isoformat() if req.last_reminded_at else None,
             "sent_count": req.reminder_count,
+            "policy": resolve_reminder_policy(req),
             "history": [
                 {
                     "id": str(log.id),
                     "participant_id": str(log.participant_id),
                     "channel": log.channel,
                     "reason": log.reason,
+                    "sequence": log.reminder_sequence,
                     "status": log.status,
                     "target": log.target,
                     "created_at": log.created_at.isoformat() if log.created_at else None,
                 }
-                for log in reminder_logs[:10]
+                for log in reminder_logs[:25]
             ],
         },
         "outstanding_participants": [
@@ -392,6 +408,78 @@ def create_proposal(
     return {"id": str(proposal.id)}
 
 
+@router.post("/{request_id}/suggest")
+def suggest_proposals(
+    request_id: uuid.UUID,
+    payload: SuggestRequestPayload,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    req = db.get(MeetingRequest, request_id)
+    if not req or req.organizer_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+
+    if payload.mode == "suggest" and not can_edit_proposals(req.status):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Proposals are locked after the request is sent",
+        )
+
+    try:
+        inputs = parse_inputs_from_payload(
+            payload.model_dump(exclude_none=True),
+            meeting_request=req,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    range_start = _dt.combine(inputs.start_date, _dt.min.time(), tzinfo=_tz.utc)
+    range_end = _dt.combine(inputs.end_date, _dt.min.time(), tzinfo=_tz.utc) + _td(days=1)
+
+    organizer_rule, blocked_intervals = load_organizer_constraints(
+        db, current_user.user_id, range_start, range_end
+    )
+
+    try:
+        suggestions = generate_suggestions(
+            inputs,
+            organizer_rule=organizer_rule,
+            blocked_intervals=blocked_intervals,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    response_payload = {
+        "suggestions": [
+            {
+                "start_at": suggestion.start_at.isoformat(),
+                "end_at": suggestion.end_at.isoformat(),
+                "score": suggestion.score,
+                "reasons": suggestion.reasons,
+            }
+            for suggestion in suggestions
+        ]
+    }
+
+    if payload.mode == "preview":
+        return response_payload
+
+    materialize_suggestions(
+        db,
+        req,
+        suggestions,
+        replace_existing=payload.replace_existing,
+    )
+    db.commit()
+    return response_payload
+
+
 @router.post("/{request_id}/finalize")
 def finalize_request(
     request_id: uuid.UUID,
@@ -465,11 +553,17 @@ def update_reminders(
         req.reminders_enabled = bool(payload.reminders_enabled)
     if "response_deadline" in payload.model_fields_set:
         req.response_deadline = payload.response_deadline
+    if "reminder_policy" in payload.model_fields_set:
+        if payload.reminder_policy is None:
+            req.reminder_policy = None
+        else:
+            req.reminder_policy = payload.reminder_policy.model_dump(exclude_none=True) or None
 
     db.commit()
     return {
         "reminders_enabled": req.reminders_enabled,
         "response_deadline": req.response_deadline.isoformat() if req.response_deadline else None,
+        "policy": resolve_reminder_policy(req),
     }
 
 
