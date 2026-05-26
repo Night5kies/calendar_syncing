@@ -1,14 +1,14 @@
 'use client';
 
 import { useParams, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   getEventResponseContext,
   submitEventResponse,
   type EventRespondContext,
 } from '../../../../lib/api';
-import { formatRange } from '../../../../lib/types';
+import { detectBrowserTimezone, formatRange } from '../../../../lib/types';
 
 type Choice = 'picked' | 'maybe' | 'declined';
 
@@ -30,6 +30,8 @@ export default function EventRespondPage() {
   const [submittingChoice, setSubmittingChoice] = useState<Choice | null>(null);
   const [submittedChoice, setSubmittedChoice] = useState<Choice | null>(null);
   const [submittedProposalLabel, setSubmittedProposalLabel] = useState<string | null>(null);
+
+  const browserTimezone = useMemo(() => detectBrowserTimezone(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,8 +63,12 @@ export default function EventRespondPage() {
   }, [eventId, inviteToken]);
 
   const event = context?.event;
+  const confirmedEvent = context?.confirmed_event ?? null;
   const invitedAs = context?.invited_as;
   const isTokenMode = Boolean(invitedAs);
+  const isConfirmed = event?.status === 'confirmed' && confirmedEvent !== null;
+  const organizerTimezone = event?.timezone ?? 'UTC';
+  const showsLocalTime = browserTimezone !== organizerTimezone;
 
   async function submit(choice: Choice) {
     if (!event) return;
@@ -109,7 +115,7 @@ export default function EventRespondPage() {
           : event.proposals.find((proposal) => proposal.id === selectedProposalId);
       setSubmittedChoice(choice);
       setSubmittedProposalLabel(
-        proposalLabel ? formatRange(proposalLabel.start_at, proposalLabel.end_at, event.timezone) : null,
+        proposalLabel ? formatRange(proposalLabel.start_at, proposalLabel.end_at, browserTimezone) : null,
       );
       setSuccess(
         choice === 'picked'
@@ -144,6 +150,77 @@ export default function EventRespondPage() {
           <p className="eyebrow">Attendee view</p>
           <h1>Loading event...</h1>
         </div>
+      </main>
+    );
+  }
+
+  if (isConfirmed && confirmedEvent) {
+    return (
+      <main className="shell shell-narrow">
+        <div className="page-head">
+          <p className="eyebrow">Attendee view</p>
+          <h1>{event.title}</h1>
+          <p className="lede">This is confirmed. Save the time below to your calendar.</p>
+        </div>
+
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="section-label">Confirmed</p>
+              <h2>
+                {confirmedEvent.start_at && confirmedEvent.end_at
+                  ? formatRange(confirmedEvent.start_at, confirmedEvent.end_at, browserTimezone)
+                  : 'Time pending'}
+              </h2>
+            </div>
+            <span className="status-pill status-confirmed">confirmed</span>
+          </div>
+          {showsLocalTime ? (
+            <p className="helper-copy">
+              Shown in your local timezone ({browserTimezone}). Organizer scheduled in {organizerTimezone}.
+            </p>
+          ) : (
+            <p className="helper-copy">Shown in {browserTimezone}.</p>
+          )}
+          <div className="flat-list">
+            {confirmedEvent.location ? (
+              <div className="stat-row">
+                <span>Location</span>
+                <strong>{confirmedEvent.location}</strong>
+              </div>
+            ) : null}
+            {confirmedEvent.video_link ? (
+              <div className="stat-row">
+                <span>Video link</span>
+                <strong>
+                  <a href={confirmedEvent.video_link} rel="noreferrer" target="_blank">
+                    {confirmedEvent.video_link}
+                  </a>
+                </strong>
+              </div>
+            ) : null}
+            {confirmedEvent.notes ? (
+              <div className="stat-row">
+                <span>Notes</span>
+                <strong>{confirmedEvent.notes}</strong>
+              </div>
+            ) : null}
+          </div>
+          {confirmedEvent.artifact_url ? (
+            <div className="button-group">
+              <a
+                className="button button-primary"
+                href={confirmedEvent.artifact_url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Add to calendar (.ics)
+              </a>
+            </div>
+          ) : (
+            <p className="helper-copy">Calendar file isn't ready yet — check back shortly.</p>
+          )}
+        </section>
       </main>
     );
   }
@@ -223,7 +300,11 @@ export default function EventRespondPage() {
 
         <section className="panel">
           <p className="section-label">Choose an option</p>
-          <p className="helper-copy">Times shown in {event.timezone}.</p>
+          <p className="helper-copy">
+            {showsLocalTime
+              ? `Times shown in your local timezone (${browserTimezone}). Organizer scheduled in ${organizerTimezone}.`
+              : `Times shown in ${browserTimezone}.`}
+          </p>
           <div className="option-list">
             {event.proposals.map((proposal, index) => (
               <button
@@ -236,7 +317,7 @@ export default function EventRespondPage() {
               >
                 <div className="option-copy">
                   <strong>Option {index + 1}</strong>
-                  <p>{formatRange(proposal.start_at, proposal.end_at, event.timezone)}</p>
+                  <p>{formatRange(proposal.start_at, proposal.end_at, browserTimezone)}</p>
                 </div>
               </button>
             ))}

@@ -71,6 +71,14 @@ export function formatRange(startIso: string, endIso: string, timezone: string) 
   )}`;
 }
 
+export function detectBrowserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
 export function formatDateTime(iso: string | null, timezone: string) {
   if (!iso) {
     return 'Not set';

@@ -138,6 +138,7 @@ select {
   border-radius: 999px;
   border: 1px solid transparent;
   padding: 0.85rem 1.15rem;
+  min-height: 44px;
   font-family: 'Courier New', monospace;
   font-size: 0.92rem;
   cursor: pointer;
@@ -211,6 +212,7 @@ select {
   border-radius: 16px;
   background: white;
   padding: 0.9rem 1rem;
+  min-height: 44px;
 }
 
 .checkbox-row {
@@ -301,7 +303,8 @@ select {
   border: 0;
   color: var(--accent-dark);
   cursor: pointer;
-  padding: 0;
+  padding: 0.5rem 0.25rem;
+  min-height: 44px;
 }
 
 .template-chip-row {

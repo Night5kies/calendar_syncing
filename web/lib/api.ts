@@ -99,6 +99,20 @@ export type OrganizerRequestDetail = {
   } | null;
 };
 
+export type ConfirmedEventPayload = {
+  id: string;
+  proposal_id: string;
+  title: string;
+  timezone: string;
+  start_at: string | null;
+  end_at: string | null;
+  duration_min: number;
+  location: string | null;
+  video_link: string | null;
+  notes: string | null;
+  artifact_url: string | null;
+};
+
 export type PublicSharePayload = {
   request: {
     id: string;
@@ -118,6 +132,7 @@ export type PublicSharePayload = {
       score: number | null;
     }>;
   };
+  confirmed_event: ConfirmedEventPayload | null;
 };
 
 export type EventRespondContext = {
@@ -139,6 +154,7 @@ export type EventRespondContext = {
       score: number | null;
     }>;
   };
+  confirmed_event: ConfirmedEventPayload | null;
   invited_as?: {
     id: string;
     display_name: string | null;
