@@ -27,3 +27,8 @@ class ParticipantCreate(BaseModel):
     phone: str | None = None
     display_name: str | None = None
     role: str = "attendee"
+
+
+class ReminderSettingsUpdate(BaseModel):
+    reminders_enabled: bool | None = None
+    response_deadline: datetime | None = None

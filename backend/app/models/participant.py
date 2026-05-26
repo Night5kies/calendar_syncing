@@ -1,4 +1,6 @@
 import uuid
+from datetime import datetime
+
 from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -28,6 +30,10 @@ class Participant(Base):
     display_name: Mapped[str | None] = mapped_column(String(200))
     role: Mapped[str] = mapped_column(String(32), default="attendee")
     status: Mapped[str] = mapped_column(String(32), default="invited", index=True)
-    responded_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
-    last_viewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    source: Mapped[str] = mapped_column(String(16), default="invited", server_default="invited")
+    invite_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now())

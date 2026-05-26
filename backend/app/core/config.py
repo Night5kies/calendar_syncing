@@ -1,14 +1,19 @@
-from pydantic_settings import BaseSettings
 from typing import Optional
+
 from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     env: str = "local"
-    database_url: str
+    database_url: Optional[str] = None
+    local_database_url: str = "postgresql+psycopg://app:app@127.0.0.1:5432/app"
+    use_local_database_in_dev: bool = True
     database_url_direct: Optional[str] = None
-    redis_url: str = "redis://localhost:6379/0"
-    supabase_jwt_secret: str
+    redis_url: Optional[str] = None
+    local_redis_url: str = "redis://127.0.0.1:6379/0"
+    use_local_redis_in_dev: bool = True
+    supabase_jwt_secret: str = "local-dev-secret"
     supabase_jwt_alg: str = "HS256"
     allow_dev_auth: bool = True
     dev_user_id: str = "11111111-1111-1111-1111-111111111111"
@@ -31,6 +36,22 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+
+    @property
+    def effective_database_url(self) -> str:
+        if self.env == "local" and self.use_local_database_in_dev:
+            return self.local_database_url
+        if self.database_url:
+            return self.database_url
+        raise ValueError("DATABASE_URL must be set when local database override is disabled")
+
+    @property
+    def effective_redis_url(self) -> str:
+        if self.env == "local" and self.use_local_redis_in_dev:
+            return self.local_redis_url
+        if self.redis_url:
+            return self.redis_url
+        raise ValueError("REDIS_URL must be set when local redis override is disabled")
 
 
 settings = Settings()  # type: ignore

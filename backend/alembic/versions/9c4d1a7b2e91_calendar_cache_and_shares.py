@@ -18,6 +18,26 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _create_policy_if_auth_uid_exists(policy_sql: str) -> None:
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM pg_namespace namespace
+                JOIN pg_proc proc ON proc.pronamespace = namespace.oid
+                WHERE namespace.nspname = 'auth'
+                  AND proc.proname = 'uid'
+            ) THEN
+                {policy_sql}
+            END IF;
+        END
+        $$;
+        """
+    )
+
+
 def upgrade() -> None:
     op.add_column("calendar_connections", sa.Column("access_token", sa.Text(), nullable=True))
     op.add_column("calendar_connections", sa.Column("refresh_token", sa.Text(), nullable=True))
@@ -151,95 +171,71 @@ def upgrade() -> None:
     op.execute("ALTER TABLE busy_cache ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE calendar_shares ENABLE ROW LEVEL SECURITY")
 
-    op.execute(
+    _create_policy_if_auth_uid_exists(
         """
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'calendar_connections_owner_rw'
-            ) THEN
-                CREATE POLICY calendar_connections_owner_rw ON calendar_connections
-                USING (user_id = auth.uid())
-                WITH CHECK (user_id = auth.uid());
-            END IF;
-        END
-        $$;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'calendar_connections_owner_rw'
+        ) THEN
+            CREATE POLICY calendar_connections_owner_rw ON calendar_connections
+            USING (user_id = auth.uid())
+            WITH CHECK (user_id = auth.uid());
+        END IF;
         """
     )
-    op.execute(
+    _create_policy_if_auth_uid_exists(
         """
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'provider_calendars_owner_rw'
-            ) THEN
-                CREATE POLICY provider_calendars_owner_rw ON provider_calendars
-                USING (user_id = auth.uid())
-                WITH CHECK (user_id = auth.uid());
-            END IF;
-        END
-        $$;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'provider_calendars_owner_rw'
+        ) THEN
+            CREATE POLICY provider_calendars_owner_rw ON provider_calendars
+            USING (user_id = auth.uid())
+            WITH CHECK (user_id = auth.uid());
+        END IF;
         """
     )
-    op.execute(
+    _create_policy_if_auth_uid_exists(
         """
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'event_cache_owner_rw'
-            ) THEN
-                CREATE POLICY event_cache_owner_rw ON event_cache
-                USING (user_id = auth.uid())
-                WITH CHECK (user_id = auth.uid());
-            END IF;
-        END
-        $$;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'event_cache_owner_rw'
+        ) THEN
+            CREATE POLICY event_cache_owner_rw ON event_cache
+            USING (user_id = auth.uid())
+            WITH CHECK (user_id = auth.uid());
+        END IF;
         """
     )
-    op.execute(
+    _create_policy_if_auth_uid_exists(
         """
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'busy_cache_owner_rw'
-            ) THEN
-                CREATE POLICY busy_cache_owner_rw ON busy_cache
-                USING (user_id = auth.uid())
-                WITH CHECK (user_id = auth.uid());
-            END IF;
-        END
-        $$;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'busy_cache_owner_rw'
+        ) THEN
+            CREATE POLICY busy_cache_owner_rw ON busy_cache
+            USING (user_id = auth.uid())
+            WITH CHECK (user_id = auth.uid());
+        END IF;
         """
     )
-    op.execute(
+    _create_policy_if_auth_uid_exists(
         """
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'calendar_shares_owner_rw'
-            ) THEN
-                CREATE POLICY calendar_shares_owner_rw ON calendar_shares
-                FOR ALL
-                USING (owner_id = auth.uid())
-                WITH CHECK (owner_id = auth.uid());
-            END IF;
-        END
-        $$;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'calendar_shares_owner_rw'
+        ) THEN
+            CREATE POLICY calendar_shares_owner_rw ON calendar_shares
+            FOR ALL
+            USING (owner_id = auth.uid())
+            WITH CHECK (owner_id = auth.uid());
+        END IF;
         """
     )
-    op.execute(
+    _create_policy_if_auth_uid_exists(
         """
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'calendar_shares_viewer_read'
-            ) THEN
-                CREATE POLICY calendar_shares_viewer_read ON calendar_shares
-                FOR SELECT
-                USING (viewer_id = auth.uid());
-            END IF;
-        END
-        $$;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND policyname = 'calendar_shares_viewer_read'
+        ) THEN
+            CREATE POLICY calendar_shares_viewer_read ON calendar_shares
+            FOR SELECT
+            USING (viewer_id = auth.uid());
+        END IF;
         """
     )
 

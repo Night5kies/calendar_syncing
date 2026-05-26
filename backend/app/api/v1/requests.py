@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, get_current_user
+from app.api.deps import CurrentUser, get_current_user, require_verified_organizer
 from app.core.config import settings
 from app.db.deps import get_db
 from app.models.meeting_request import MeetingRequest
@@ -16,7 +16,12 @@ from app.models.proposal_response import ProposalResponse
 from app.models.reminder_log import ReminderLog
 from app.models.scheduled_event import ScheduledEvent
 from app.models.share_link import ShareLink
-from app.schemas.meeting_request import MeetingRequestCreate, ParticipantCreate, ProposalCreate
+from app.schemas.meeting_request import (
+    MeetingRequestCreate,
+    ParticipantCreate,
+    ProposalCreate,
+    ReminderSettingsUpdate,
+)
 from app.schemas.proposal_response import ProposalResponseCreate, RequestFinalize
 from app.services.meeting_requests import (
     compute_end_at,
@@ -26,6 +31,12 @@ from app.services.meeting_requests import (
     scheduled_event_snapshot,
     validate_manual_proposal_rules,
 )
+from app.services.participants import (
+    build_invite_url,
+    generate_invite_token,
+    normalize_email,
+)
+from app.models.profile import Profile
 from app.services.scheduled_events import finalize_scheduled_event
 
 router = APIRouter()
@@ -152,7 +163,11 @@ def get_request(
                 "email": participant.email,
                 "phone": participant.phone,
                 "status": participant.status,
+                "source": participant.source,
                 "responded_at": participant.responded_at.isoformat() if participant.responded_at else None,
+                "invite_url": build_invite_url(request_id, participant.invite_token)
+                if participant.invite_token
+                else None,
             }
             for participant in participants
         ],
@@ -202,15 +217,23 @@ def get_request(
         ],
         "share": {
             "token": share_link.token,
-            "url": f"/v1/share/public/{share_link.token}",
+            "url": build_invite_url(request_id, None),
+            "legacy_url": f"{settings.app_base_url}/respond/{share_link.token}",
         }
         if share_link
         else None,
         "confirmed_event": {
             "id": str(scheduled.id),
+            "proposal_id": str(scheduled.proposal_id),
             "provider": scheduled.provider,
             "provider_event_id": scheduled.provider_event_id,
             "artifact_uid": scheduled.artifact_uid,
+            "title": scheduled.title,
+            "start_at": scheduled.start_at.isoformat() if scheduled.start_at else None,
+            "end_at": compute_end_at(scheduled.start_at, scheduled.duration_min).isoformat()
+            if scheduled.start_at
+            else None,
+            "timezone": scheduled.timezone,
             "artifact_url": f"{settings.api_base_url}/v1/requests/{request_id}/artifact.ics"
             if scheduled.artifact_path
             else None,
@@ -291,26 +314,45 @@ def create_participant(
     if not payload.email and not payload.phone:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Email or phone required")
 
+    normalized_email = normalize_email(payload.email)
+    normalized_phone = payload.phone.strip() if payload.phone else None
+
     contact_key = None
-    if payload.email:
-        contact_key = f"email:{payload.email.strip().lower()}"
-    elif payload.phone:
-        contact_key = f"phone:{payload.phone.strip()}"
+    if normalized_email:
+        contact_key = f"email:{normalized_email}"
+    elif normalized_phone:
+        contact_key = f"phone:{normalized_phone}"
+
+    user_id_for_invite: uuid.UUID | None = None
+    email_verified_at = None
+    if normalized_email:
+        profile = db.execute(
+            select(Profile).where(func.lower(Profile.email) == normalized_email)
+        ).scalar_one_or_none()
+        if profile is not None:
+            user_id_for_invite = profile.id
+            email_verified_at = profile.email_verified_at
 
     participant = Participant(
         meeting_request_id=request_id,
-        user_id=None,
-        email=payload.email,
-        phone=payload.phone,
+        user_id=user_id_for_invite,
+        email=normalized_email,
+        phone=normalized_phone,
         display_name=payload.display_name,
         role=payload.role,
         status="invited",
+        source="invited",
+        invite_token=generate_invite_token(),
+        email_verified_at=email_verified_at,
         contact_key=contact_key,
     )
     db.add(participant)
     db.commit()
     db.refresh(participant)
-    return {"id": str(participant.id)}
+    return {
+        "id": str(participant.id),
+        "invite_url": build_invite_url(request_id, participant.invite_token),
+    }
 
 
 @router.post("/{request_id}/proposals")
@@ -355,7 +397,7 @@ def finalize_request(
     request_id: uuid.UUID,
     payload: RequestFinalize,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_verified_organizer),
 ):
     req = db.get(MeetingRequest, request_id)
     if not req or req.organizer_id != current_user.user_id:
@@ -397,7 +439,7 @@ def finalize_request(
 def ping_non_responders(
     request_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_verified_organizer),
 ):
     req = db.get(MeetingRequest, request_id)
     if not req or req.organizer_id != current_user.user_id:
@@ -406,6 +448,29 @@ def ping_non_responders(
     result = dispatch_request_reminders(db, req, reason="manual_ping")
     db.commit()
     return result
+
+
+@router.patch("/{request_id}/reminders")
+def update_reminders(
+    request_id: uuid.UUID,
+    payload: ReminderSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_verified_organizer),
+):
+    req = db.get(MeetingRequest, request_id)
+    if not req or req.organizer_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+
+    if "reminders_enabled" in payload.model_fields_set:
+        req.reminders_enabled = bool(payload.reminders_enabled)
+    if "response_deadline" in payload.model_fields_set:
+        req.response_deadline = payload.response_deadline
+
+    db.commit()
+    return {
+        "reminders_enabled": req.reminders_enabled,
+        "response_deadline": req.response_deadline.isoformat() if req.response_deadline else None,
+    }
 
 
 @router.get("/{request_id}/artifact.ics")

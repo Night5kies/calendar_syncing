@@ -9,6 +9,7 @@ from app.models.participant import Participant
 from app.models.proposal_response import ProposalResponse
 from app.models.reminder_log import ReminderLog
 from app.services.notifications import send_notification
+from app.services.participants import build_invite_url
 
 MAX_MANUAL_PROPOSALS = 5
 MAX_REMINDERS_PER_PARTICIPANT = 3
@@ -89,7 +90,11 @@ def build_reminder_copy(meeting_request: MeetingRequest, participant: Participan
         else ""
     )
     reason_text = "Final reminder." if reason == "deadline" else "Quick ping from the organizer."
-    return f"Hi {name}, please respond to \"{meeting_request.title}\".{deadline_text} {reason_text}".strip()
+    url = build_invite_url(meeting_request.id, participant.invite_token)
+    return (
+        f"Hi {name}, please respond to \"{meeting_request.title}\".{deadline_text} "
+        f"{reason_text} {url}"
+    ).strip()
 
 
 def build_reminder_subject(meeting_request: MeetingRequest) -> str:

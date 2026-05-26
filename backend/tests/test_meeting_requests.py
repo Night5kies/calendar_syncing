@@ -63,6 +63,7 @@ class MeetingRequestTests(unittest.TestCase):
 
     def test_reminder_helpers(self) -> None:
         meeting_request = SimpleNamespace(
+            id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
             title="Dinner",
             response_deadline=datetime(2026, 1, 7, 1, 0, tzinfo=timezone.utc),
         )
@@ -70,11 +71,13 @@ class MeetingRequestTests(unittest.TestCase):
             display_name="Alex",
             email="alex@example.com",
             phone=None,
+            invite_token="abc123",
         )
         self.assertEqual(reminder_target_for_participant(participant), ("email", "alex@example.com"))
         message = build_reminder_copy(meeting_request, participant, "deadline")
         self.assertIn("Dinner", message)
         self.assertIn("Final reminder.", message)
+        self.assertIn("/events/11111111-1111-1111-1111-111111111111/respond?token=abc123", message)
 
     def test_confirmation_artifact_helpers(self) -> None:
         ics = build_ics_body(

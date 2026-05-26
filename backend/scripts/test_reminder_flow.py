@@ -97,19 +97,21 @@ def assert_manual_ping(client: httpx.Client, state: FlowState) -> None:
 
 
 def submit_one_response(client: httpx.Client, state: FlowState) -> None:
-    share = request(client, "GET", f"/v1/share/public/{state.share_token}")
-    proposal_id = share["request"]["proposals"][0]["id"]
+    detail = request(client, "GET", f"/v1/requests/{state.request_id}")
+    alex = next(p for p in detail["participants"] if p["display_name"] == state.participant_name)
+    invite_token = alex["invite_url"].split("token=", 1)[1]
+    proposal_id = detail["proposals"][0]["id"]
 
     request(
         client,
         "POST",
-        f"/v1/share/public/{state.share_token}/responses",
+        f"/v1/events/{state.request_id}/responses",
         json={
             "display_name": state.participant_name,
-            "guest_key": "script-guest-alex",
             "proposal_id": proposal_id,
             "choice": "picked",
             "email": "alex@example.com",
+            "invite_token": invite_token,
         },
     )
 
@@ -119,7 +121,7 @@ def submit_one_response(client: httpx.Client, state: FlowState) -> None:
     assert len(detail["outstanding_participants"]) == 1
     remaining = detail["outstanding_participants"][0]
     assert remaining["display_name"] == "Jules"
-    print("Attendee response removed one participant from the outstanding list.")
+    print("Attendee response (via invite token) removed one participant from the outstanding list.")
 
 
 def assert_second_ping(client: httpx.Client, state: FlowState) -> None:
