@@ -10,8 +10,29 @@ import {
   pingNonResponders,
   updateReminderSettings,
   type OrganizerRequestDetail,
+  type ReminderPolicy,
 } from '../../../lib/api';
 import { formatDateTime, formatRange } from '../../../lib/types';
+
+function describeReminderReason(reason: string): string {
+  switch (reason) {
+    case 'manual_ping':
+      return 'Manual ping';
+    case 'deadline':
+      return 'Deadline reminder';
+    case 'scheduled':
+      return 'Scheduled reminder';
+    default:
+      return reason;
+  }
+}
+
+function describeReminderStatus(status: string): string {
+  if (!status) {
+    return 'queued';
+  }
+  return status;
+}
 
 function toLocalDateTimeInput(iso: string | null) {
   if (!iso) {
@@ -36,6 +57,11 @@ export default function RequestDetailPage() {
   const [isPinging, setIsPinging] = useState(false);
   const [remindersEnabledDraft, setRemindersEnabledDraft] = useState(true);
   const [deadlineDraft, setDeadlineDraft] = useState('');
+  const [policyDraft, setPolicyDraft] = useState<ReminderPolicy>({
+    initial_hours: 12,
+    followup_hours: 24,
+    max_per_participant: 3,
+  });
   const [isSavingReminders, setIsSavingReminders] = useState(false);
 
   useEffect(() => {
@@ -66,6 +92,11 @@ export default function RequestDetailPage() {
     }
     setRemindersEnabledDraft(request.reminders.enabled);
     setDeadlineDraft(toLocalDateTimeInput(request.reminders.response_deadline));
+    setPolicyDraft({
+      initial_hours: request.reminders.policy.initial_hours,
+      followup_hours: request.reminders.policy.followup_hours,
+      max_per_participant: request.reminders.policy.max_per_participant,
+    });
   }, [request]);
 
   async function copySharePath() {
@@ -98,6 +129,11 @@ export default function RequestDetailPage() {
       await updateReminderSettings(requestId, {
         reminders_enabled: remindersEnabledDraft,
         response_deadline: deadlineDraft ? new Date(deadlineDraft).toISOString() : null,
+        reminder_policy: {
+          initial_hours: policyDraft.initial_hours,
+          followup_hours: policyDraft.followup_hours,
+          max_per_participant: policyDraft.max_per_participant,
+        },
       });
       const next = await getOrganizerRequest(requestId);
       setRequest(next);
@@ -115,11 +151,15 @@ export default function RequestDetailPage() {
     setIsPinging(true);
     try {
       const result = await pingNonResponders(requestId);
-      setPingMessage(
-        result.sent_count > 0
-          ? `Queued ${result.sent_count} reminders for non-responders.`
-          : 'No new reminders were queued.',
-      );
+      const parts: string[] = [];
+      if (result.sent_count > 0) {
+        parts.push(`Queued ${result.sent_count} reminder${result.sent_count === 1 ? '' : 's'}`);
+      }
+      if (result.skipped_count > 0) {
+        parts.push(`skipped ${result.skipped_count} (cap or duplicate)`);
+      }
+      parts.push(`${result.outstanding_count} still outstanding`);
+      setPingMessage(parts.join(' - '));
       const next = await getOrganizerRequest(requestId);
       setRequest(next);
     } catch (pingError) {
@@ -127,6 +167,14 @@ export default function RequestDetailPage() {
     } finally {
       setIsPinging(false);
     }
+  }
+
+  function updatePolicyField(field: keyof ReminderPolicy, raw: string) {
+    const next = Number(raw);
+    if (!Number.isFinite(next) || next < 1) {
+      return;
+    }
+    setPolicyDraft((current) => ({ ...current, [field]: Math.floor(next) }));
   }
 
   if (error) {
@@ -282,6 +330,36 @@ export default function RequestDetailPage() {
               onChange={(event) => setDeadlineDraft(event.target.value)}
             />
           </label>
+          <label className="field">
+            <span>First reminder after (hours since send)</span>
+            <input
+              type="number"
+              min={1}
+              max={720}
+              value={policyDraft.initial_hours}
+              onChange={(event) => updatePolicyField('initial_hours', event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Follow-up cadence (hours)</span>
+            <input
+              type="number"
+              min={1}
+              max={720}
+              value={policyDraft.followup_hours}
+              onChange={(event) => updatePolicyField('followup_hours', event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Max reminders per participant</span>
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={policyDraft.max_per_participant}
+              onChange={(event) => updatePolicyField('max_per_participant', event.target.value)}
+            />
+          </label>
         </div>
         <div className="button-group">
           <button
@@ -304,6 +382,37 @@ export default function RequestDetailPage() {
           <p className="helper-copy">Everyone has responded.</p>
         )}
         {pingMessage ? <p className="success-text">{pingMessage}</p> : null}
+        {request.reminders.history.length > 0 ? (
+          <div className="reminder-history">
+            <p className="section-label">Reminder history</p>
+            <ul className="reminder-history-list">
+              {request.reminders.history.map((entry) => {
+                const participant = request.participants.find(
+                  (candidate) => candidate.id === entry.participant_id,
+                );
+                const who =
+                  participant?.display_name ??
+                  participant?.email ??
+                  participant?.phone ??
+                  entry.target;
+                return (
+                  <li key={entry.id} className="reminder-history-item">
+                    <span className="reminder-history-time">
+                      {formatDateTime(entry.created_at, request.timezone)}
+                    </span>
+                    <span className="reminder-history-meta">
+                      <strong>{who}</strong>
+                      <span> - {entry.channel}</span>
+                      <span> - #{entry.sequence}</span>
+                      <span> - {describeReminderReason(entry.reason)}</span>
+                      <span> - {describeReminderStatus(entry.status)}</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
       </section>
 
       <section className="panel">

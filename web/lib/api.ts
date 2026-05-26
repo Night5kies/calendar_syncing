@@ -17,6 +17,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export type ReminderPolicy = {
+  initial_hours: number;
+  followup_hours: number;
+  max_per_participant: number;
+};
+
+export type ReminderPolicyInput = Partial<ReminderPolicy>;
+
 export type OrganizerRequestDetail = {
   id: string;
   title: string;
@@ -70,11 +78,13 @@ export type OrganizerRequestDetail = {
     response_deadline: string | null;
     last_reminded_at: string | null;
     sent_count: number;
+    policy: ReminderPolicy;
     history: Array<{
       id: string;
       participant_id: string;
       channel: string;
       reason: string;
+      sequence: number;
       status: string;
       target: string;
       created_at: string | null;
@@ -193,6 +203,7 @@ export async function createRequest(payload: {
   notes: string | null;
   response_deadline: string | null;
   reminders_enabled: boolean;
+  reminder_policy?: ReminderPolicyInput | null;
 }) {
   return request<{ id: string }>('/v1/requests', {
     method: 'POST',
@@ -242,6 +253,7 @@ export async function pingNonResponders(requestId: string) {
     sent_count: number;
     skipped_count: number;
     outstanding_count: number;
+    policy: ReminderPolicy;
     message_preview: string[];
   }>(`/v1/requests/${requestId}/reminders/ping`, {
     method: 'POST',
@@ -253,11 +265,13 @@ export async function updateReminderSettings(
   payload: {
     reminders_enabled?: boolean;
     response_deadline?: string | null;
+    reminder_policy?: ReminderPolicyInput | null;
   },
 ) {
   return request<{
     reminders_enabled: boolean;
     response_deadline: string | null;
+    policy: ReminderPolicy;
   }>(`/v1/requests/${requestId}/reminders`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
@@ -284,6 +298,93 @@ export async function submitPublicResponse(
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export type AvailabilityWeekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
+export type AvailabilityWindow = { start: string; end: string };
+
+export type AvailabilityWeeklyHours = Record<AvailabilityWeekday, AvailabilityWindow[]>;
+
+export type AvailabilityRule = {
+  id: string;
+  timezone: string;
+  weekly_hours: AvailabilityWeeklyHours;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type AvailabilityBlock = {
+  id: string;
+  start_at: string;
+  end_at: string;
+  type: 'busy' | 'private' | 'ooo';
+  created_at: string | null;
+};
+
+export async function getAvailabilityRules() {
+  return request<{ rules: AvailabilityRule[] }>(`/v1/availability/rules`);
+}
+
+export async function upsertAvailabilityRule(payload: {
+  timezone: string;
+  weekly_hours: AvailabilityWeeklyHours;
+}) {
+  return request<AvailabilityRule>(`/v1/availability/rules`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getAvailabilityBlocks() {
+  return request<{ blocks: AvailabilityBlock[] }>(`/v1/availability/blocks`);
+}
+
+export async function createAvailabilityBlock(payload: {
+  start_at: string;
+  end_at: string;
+  type: AvailabilityBlock['type'];
+}) {
+  return request<AvailabilityBlock>(`/v1/availability/blocks`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export type SuggestSlotPayload = {
+  start_at: string;
+  end_at: string;
+  score: number;
+  reasons: string[];
+};
+
+export async function suggestProposals(
+  requestId: string,
+  payload: {
+    start_date: string;
+    end_date: string;
+    days_of_week?: number[];
+    time_windows?: Array<{ start_minute: number; end_minute: number }>;
+    exclude_dates?: string[];
+    limit?: number;
+    replace_existing?: boolean;
+    mode?: 'suggest' | 'preview';
+  },
+) {
+  return request<{ suggestions: SuggestSlotPayload[] }>(`/v1/requests/${requestId}/suggest`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteAvailabilityBlock(blockId: string) {
+  const response = await fetch(`${API_BASE}/v1/availability/blocks/${blockId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Request failed: ${response.status}`);
+  }
 }
 
 export async function getEventResponseContext(eventId: string, inviteToken?: string | null) {

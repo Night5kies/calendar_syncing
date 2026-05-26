@@ -8,8 +8,35 @@ import {
   addProposal,
   createRequest,
   createShareLink,
+  suggestProposals,
+  type SuggestSlotPayload,
 } from '../../lib/api';
 import type { RequestTemplate } from '../../lib/types';
+
+type PollMode = 'manual' | 'auto';
+
+const WEEKDAY_CHIPS: { value: number; label: string }[] = [
+  { value: 0, label: 'Mon' },
+  { value: 1, label: 'Tue' },
+  { value: 2, label: 'Wed' },
+  { value: 3, label: 'Thu' },
+  { value: 4, label: 'Fri' },
+  { value: 5, label: 'Sat' },
+  { value: 6, label: 'Sun' },
+];
+
+function isoDateOnly(offsetDays: number): string {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + offsetDays);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function timeStringToMinutes(value: string): number {
+  const [hours, minutes] = value.split(':').map((part) => Number(part));
+  return Math.max(0, Math.min(1440, hours * 60 + minutes));
+}
 
 type OptionForm = {
   id: string;
@@ -138,7 +165,19 @@ export default function CreatePage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [pollMode, setPollMode] = useState<PollMode>('manual');
+  const [autoStartDate, setAutoStartDate] = useState(() => isoDateOnly(1));
+  const [autoEndDate, setAutoEndDate] = useState(() => isoDateOnly(7));
+  const [autoWeekdays, setAutoWeekdays] = useState<number[]>([0, 1, 2, 3, 4]);
+  const [autoWindowStart, setAutoWindowStart] = useState('09:00');
+  const [autoWindowEnd, setAutoWindowEnd] = useState('17:00');
+  const [autoExcludes, setAutoExcludes] = useState('');
+  const [autoSuggestionLimit, setAutoSuggestionLimit] = useState(5);
+  const [autoPreview, setAutoPreview] = useState<SuggestSlotPayload[] | null>(null);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+
   const durationTouched = useRef(false);
+  const previewDraftIdRef = useRef<string | null>(null);
   const [slotsTouched, setSlotsTouched] = useState(false);
 
   useEffect(() => {
@@ -234,6 +273,55 @@ export default function CreatePage() {
     window.localStorage.setItem(LAST_SETTINGS_KEY, JSON.stringify(payload));
   }
 
+  function autoConstraintsPayload() {
+    const startMin = timeStringToMinutes(autoWindowStart);
+    const endMin = timeStringToMinutes(autoWindowEnd);
+    if (endMin <= startMin) {
+      throw new Error('Time-of-day window: end must be after start.');
+    }
+    return {
+      start_date: autoStartDate,
+      end_date: autoEndDate,
+      days_of_week: autoWeekdays.length > 0 ? autoWeekdays : undefined,
+      time_windows: [{ start_minute: startMin, end_minute: endMin }],
+      exclude_dates: autoExcludes
+        .split(/[\s,]+/)
+        .map((token) => token.trim())
+        .filter(Boolean),
+      limit: autoSuggestionLimit,
+    };
+  }
+
+  async function previewAutoSuggestions() {
+    setError(null);
+    setAutoPreview(null);
+    setIsPreviewing(true);
+    try {
+      const constraints = autoConstraintsPayload();
+      // Preview requires an existing request id; create a throwaway draft, preview, delete.
+      // Cheaper path: re-use a single draft created at preview time and keep it for submit.
+      const created = await createRequest({
+        title,
+        duration_min: durationMinutes,
+        timezone,
+        event_type: template,
+        location: location.trim() || null,
+        video_link: videoLink.trim() || null,
+        notes: notes || null,
+        response_deadline: responseDeadline ? new Date(responseDeadline).toISOString() : null,
+        reminders_enabled: remindersEnabled,
+      });
+      const result = await suggestProposals(created.id, { ...constraints, mode: 'preview' });
+      setAutoPreview(result.suggestions);
+      // store the draft id so submit can finalize against the same one
+      previewDraftIdRef.current = created.id;
+    } catch (previewError) {
+      setError(previewError instanceof Error ? previewError.message : 'Unable to preview suggestions.');
+    } finally {
+      setIsPreviewing(false);
+    }
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -256,8 +344,13 @@ export default function CreatePage() {
       return;
     }
 
-    if (options.length < 3 || options.some((option) => !option.start)) {
+    if (pollMode === 'manual' && (options.length < 3 || options.some((option) => !option.start))) {
       setError('Add 3 to 5 time options for the MVP poll.');
+      return;
+    }
+
+    if (pollMode === 'auto' && !autoStartDate) {
+      setError('Pick a start date for the search range.');
       return;
     }
 
@@ -265,36 +358,50 @@ export default function CreatePage() {
     setIsSubmitting(true);
 
     try {
-      const request = await createRequest({
-        title,
-        duration_min: durationMinutes,
-        timezone,
-        event_type: template,
-        location: location.trim() || null,
-        video_link: videoLink.trim() || null,
-        notes: notes || null,
-        response_deadline: responseDeadline ? new Date(responseDeadline).toISOString() : null,
-        reminders_enabled: remindersEnabled,
-      });
+      let requestId = pollMode === 'auto' ? previewDraftIdRef.current : null;
+      if (!requestId) {
+        const created = await createRequest({
+          title,
+          duration_min: durationMinutes,
+          timezone,
+          event_type: template,
+          location: location.trim() || null,
+          video_link: videoLink.trim() || null,
+          notes: notes || null,
+          response_deadline: responseDeadline ? new Date(responseDeadline).toISOString() : null,
+          reminders_enabled: remindersEnabled,
+        });
+        requestId = created.id;
+      }
 
       for (const participant of parsedParticipants) {
-        await addParticipant(request.id, {
+        await addParticipant(requestId, {
           display_name: participant.displayName,
           email: participant.email,
           phone: participant.phone,
         });
       }
 
-      for (const [index, option] of options.entries()) {
-        await addProposal(request.id, {
-          rank: index + 1,
-          start_at: new Date(option.start).toISOString(),
+      if (pollMode === 'manual') {
+        for (const [index, option] of options.entries()) {
+          await addProposal(requestId, {
+            rank: index + 1,
+            start_at: new Date(option.start).toISOString(),
+          });
+        }
+      } else {
+        const constraints = autoConstraintsPayload();
+        await suggestProposals(requestId, {
+          ...constraints,
+          mode: 'suggest',
+          replace_existing: true,
         });
       }
 
-      await createShareLink(request.id);
+      await createShareLink(requestId);
       persistLastSettings();
-      router.push(`/request/${request.id}`);
+      previewDraftIdRef.current = null;
+      router.push(`/request/${requestId}`);
     } catch (submissionError) {
       setError(
         submissionError instanceof Error ? submissionError.message : 'Unable to create request.',
@@ -302,6 +409,14 @@ export default function CreatePage() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function toggleWeekday(value: number) {
+    setAutoWeekdays((current) =>
+      current.includes(value)
+        ? current.filter((day) => day !== value)
+        : [...current, value].sort((a, b) => a - b),
+    );
   }
 
   return (
@@ -449,49 +564,183 @@ export default function CreatePage() {
         <section className="panel">
           <div className="panel-head">
             <div>
-              <p className="section-label">Manual poll</p>
-              <h2>Time options</h2>
+              <p className="section-label">Poll mode</p>
+              <h2>{pollMode === 'manual' ? 'Time options' : 'Find a time'}</h2>
             </div>
-            <div className="button-group">
-              {slotsTouched ? (
-                <button
-                  className="button button-secondary"
-                  onClick={resetSlotsToTemplate}
-                  type="button"
-                >
-                  Reset to template
-                </button>
-              ) : null}
-              <button className="button button-secondary" onClick={addOption} type="button">
-                Add option
+            <div className="mode-toggle" role="group" aria-label="Poll mode">
+              <button
+                className={`mode-toggle-button${pollMode === 'manual' ? ' mode-toggle-button-active' : ''}`}
+                type="button"
+                aria-pressed={pollMode === 'manual'}
+                onClick={() => setPollMode('manual')}
+              >
+                Manual poll
+              </button>
+              <button
+                className={`mode-toggle-button${pollMode === 'auto' ? ' mode-toggle-button-active' : ''}`}
+                type="button"
+                aria-pressed={pollMode === 'auto'}
+                onClick={() => setPollMode('auto')}
+              >
+                Find a time
               </button>
             </div>
           </div>
-          <div className="option-list">
-            {options.map((option, index) => (
-              <div className="option-row" key={option.id}>
-                <label className="field">
-                  <span>Option {index + 1}</span>
-                  <input
-                    type="datetime-local"
-                    value={option.start}
-                    onChange={(event) => updateOption(option.id, event.target.value)}
-                  />
-                </label>
-                <button
-                  className="inline-link"
-                  onClick={() => removeOption(option.id)}
-                  type="button"
-                >
-                  Remove
+
+          {pollMode === 'manual' ? (
+            <>
+              <div className="button-group" style={{ justifyContent: 'flex-end' }}>
+                {slotsTouched ? (
+                  <button
+                    className="button button-secondary"
+                    onClick={resetSlotsToTemplate}
+                    type="button"
+                  >
+                    Reset to template
+                  </button>
+                ) : null}
+                <button className="button button-secondary" onClick={addOption} type="button">
+                  Add option
                 </button>
               </div>
-            ))}
-          </div>
-          <p className="helper-copy">
-            Backend rule: 3 to 5 manual options, locked after send. Template pre-fills sensible
-            windows you can edit.
-          </p>
+              <div className="option-list">
+                {options.map((option, index) => (
+                  <div className="option-row" key={option.id}>
+                    <label className="field">
+                      <span>Option {index + 1}</span>
+                      <input
+                        type="datetime-local"
+                        value={option.start}
+                        onChange={(event) => updateOption(option.id, event.target.value)}
+                      />
+                    </label>
+                    <button
+                      className="inline-link"
+                      onClick={() => removeOption(option.id)}
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <p className="helper-copy">
+                Backend rule: 3 to 5 manual options, locked after send. Template pre-fills sensible
+                windows you can edit.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="helper-copy">
+                We&rsquo;ll pick {autoSuggestionLimit} slots inside your constraints and the
+                organizer&rsquo;s saved availability. Each suggestion includes a one-line reason.
+              </p>
+              <div className="field-grid">
+                <label className="field">
+                  <span>Start date</span>
+                  <input
+                    type="date"
+                    value={autoStartDate}
+                    onChange={(event) => setAutoStartDate(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>End date</span>
+                  <input
+                    type="date"
+                    value={autoEndDate}
+                    onChange={(event) => setAutoEndDate(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="field">
+                <span>Days of week</span>
+                <div className="weekday-chip-row">
+                  {WEEKDAY_CHIPS.map((day) => {
+                    const isActive = autoWeekdays.includes(day.value);
+                    return (
+                      <button
+                        key={day.value}
+                        type="button"
+                        className={`weekday-chip${isActive ? ' weekday-chip-active' : ''}`}
+                        aria-pressed={isActive}
+                        onClick={() => toggleWeekday(day.value)}
+                      >
+                        {day.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="field-grid">
+                <label className="field">
+                  <span>Earliest start (local)</span>
+                  <input
+                    type="time"
+                    value={autoWindowStart}
+                    onChange={(event) => setAutoWindowStart(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>Latest end (local)</span>
+                  <input
+                    type="time"
+                    value={autoWindowEnd}
+                    onChange={(event) => setAutoWindowEnd(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>How many suggestions</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={autoSuggestionLimit}
+                    onChange={(event) =>
+                      setAutoSuggestionLimit(Math.max(1, Math.min(10, Number(event.target.value))))
+                    }
+                  />
+                </label>
+              </div>
+              <label className="field">
+                <span>Exclude dates (comma-separated, YYYY-MM-DD)</span>
+                <input
+                  type="text"
+                  value={autoExcludes}
+                  placeholder="2026-05-30, 2026-06-01"
+                  onChange={(event) => setAutoExcludes(event.target.value)}
+                />
+              </label>
+              <div className="button-group">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={isPreviewing}
+                  onClick={previewAutoSuggestions}
+                >
+                  {isPreviewing ? 'Searching…' : 'Preview suggestions'}
+                </button>
+              </div>
+              {autoPreview ? (
+                autoPreview.length === 0 ? (
+                  <p className="helper-copy">No slots match those constraints. Widen the window or add days.</p>
+                ) : (
+                  <ul className="suggestion-list">
+                    {autoPreview.map((slot, index) => (
+                      <li key={slot.start_at + index} className="suggestion-item">
+                        <strong>
+                          {new Date(slot.start_at).toLocaleString(undefined, { timeZone: timezone })}
+                        </strong>
+                        <span className="helper-copy">
+                          {slot.reasons.join(' · ')} · score {slot.score.toFixed(2)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              ) : null}
+            </>
+          )}
         </section>
 
         {error ? <p className="error-text">{error}</p> : null}
