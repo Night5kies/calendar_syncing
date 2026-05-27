@@ -486,11 +486,12 @@ export default function RequestDetailPage() {
             </div>
           </div>
           <p className="helper-copy">
-            The request is confirmed. Share the final time back into the chat and send the ICS if
-            anyone wants a calendar-safe artifact.
+            The request is confirmed. Attendees with email on file were sent the ICS automatically
+            (file outbox in local mode). Re-finalizing the same event won&rsquo;t double-send — the
+            invite job dedupes per scheduled event + participant.
           </p>
-          {request.confirmed_event.artifact_url ? (
-            <div className="button-group">
+          <div className="button-group">
+            {request.confirmed_event.artifact_url ? (
               <a
                 className="button button-primary"
                 href={request.confirmed_event.artifact_url}
@@ -499,7 +500,31 @@ export default function RequestDetailPage() {
               >
                 Download ICS
               </a>
-            </div>
+            ) : null}
+            <a
+              className="button button-secondary"
+              href={`/events/${request.id}/respond`}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Open attendee view
+            </a>
+          </div>
+          {request.participants.length > 0 ? (
+            <ul className="confirmed-recipients">
+              {request.participants.map((participant) => (
+                <li key={participant.id}>
+                  <strong>
+                    {participant.display_name ?? participant.email ?? participant.phone ?? 'Guest'}
+                  </strong>
+                  <span className="helper-copy">
+                    {participant.email
+                      ? `Invite emailed to ${participant.email}`
+                      : 'No email on file — share the attendee link manually'}
+                  </span>
+                </li>
+              ))}
+            </ul>
           ) : null}
         </section>
       ) : null}

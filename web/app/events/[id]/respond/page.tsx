@@ -12,6 +12,51 @@ import { detectBrowserTimezone, formatRange } from '../../../../lib/types';
 
 type Choice = 'picked' | 'maybe' | 'declined';
 
+function toCalendarStamp(iso: string): string {
+  const date = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}` +
+    `T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`
+  );
+}
+
+function buildGoogleCalendarUrl(payload: {
+  title: string;
+  startIso: string;
+  endIso: string;
+  details: string;
+  location: string;
+}): string {
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: payload.title,
+    dates: `${toCalendarStamp(payload.startIso)}/${toCalendarStamp(payload.endIso)}`,
+    details: payload.details,
+    location: payload.location,
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function buildOutlookCalendarUrl(payload: {
+  title: string;
+  startIso: string;
+  endIso: string;
+  details: string;
+  location: string;
+}): string {
+  const params = new URLSearchParams({
+    path: '/calendar/action/compose',
+    rru: 'addevent',
+    subject: payload.title,
+    startdt: payload.startIso,
+    enddt: payload.endIso,
+    body: payload.details,
+    location: payload.location,
+  });
+  return `https://outlook.live.com/calendar/0/deeplink/compose?${params.toString()}`;
+}
+
 export default function EventRespondPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -206,20 +251,55 @@ export default function EventRespondPage() {
               </div>
             ) : null}
           </div>
-          {confirmedEvent.artifact_url ? (
-            <div className="button-group">
+          <div className="button-group">
+            {confirmedEvent.start_at && confirmedEvent.end_at ? (
+              <>
+                <a
+                  className="button button-primary"
+                  href={buildGoogleCalendarUrl({
+                    title: event.title,
+                    startIso: confirmedEvent.start_at,
+                    endIso: confirmedEvent.end_at,
+                    details: confirmedEvent.notes ?? '',
+                    location: confirmedEvent.location ?? confirmedEvent.video_link ?? '',
+                  })}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Add to Google Calendar
+                </a>
+                <a
+                  className="button button-secondary"
+                  href={buildOutlookCalendarUrl({
+                    title: event.title,
+                    startIso: confirmedEvent.start_at,
+                    endIso: confirmedEvent.end_at,
+                    details: confirmedEvent.notes ?? '',
+                    location: confirmedEvent.location ?? confirmedEvent.video_link ?? '',
+                  })}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Add to Outlook
+                </a>
+              </>
+            ) : null}
+            {confirmedEvent.artifact_url ? (
               <a
-                className="button button-primary"
+                className="button button-secondary"
                 href={confirmedEvent.artifact_url}
                 rel="noreferrer"
                 target="_blank"
               >
-                Add to calendar (.ics)
+                Apple Calendar (.ics)
               </a>
-            </div>
-          ) : (
-            <p className="helper-copy">Calendar file isn't ready yet — check back shortly.</p>
-          )}
+            ) : null}
+          </div>
+          {!confirmedEvent.artifact_url ? (
+            <p className="helper-copy">
+              ICS file isn’t ready yet — the Google/Outlook buttons still work.
+            </p>
+          ) : null}
         </section>
       </main>
     );

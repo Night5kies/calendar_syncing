@@ -5,12 +5,16 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   createAvailabilityBlock,
   deleteAvailabilityBlock,
+  disconnectGoogle,
   getAvailabilityBlocks,
   getAvailabilityRules,
+  getCalendarConnections,
+  startGoogleConnect,
   upsertAvailabilityRule,
   type AvailabilityBlock,
   type AvailabilityWeekday,
   type AvailabilityWeeklyHours,
+  type CalendarConnectionPayload,
 } from '../../../lib/api';
 import { formatDateTime } from '../../../lib/types';
 
@@ -74,13 +78,19 @@ export default function AvailabilitySettingsPage() {
   const [blockType, setBlockType] = useState<AvailabilityBlock['type']>('private');
   const [isCreatingBlock, setIsCreatingBlock] = useState(false);
 
+  const [connections, setConnections] = useState<CalendarConnectionPayload[]>([]);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const [rulesPayload, blocksPayload] = await Promise.all([
+        const [rulesPayload, blocksPayload, connectionsPayload] = await Promise.all([
           getAvailabilityRules(),
           getAvailabilityBlocks(),
+          getCalendarConnections().catch(() => ({ connections: [] as CalendarConnectionPayload[] })),
         ]);
         if (cancelled) return;
         const rule = rulesPayload.rules[0];
@@ -91,6 +101,13 @@ export default function AvailabilitySettingsPage() {
           setTimezone(browserTimezone());
         }
         setBlocks(blocksPayload.blocks);
+        setConnections(connectionsPayload.connections);
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          if (params.get('google') === 'connected') {
+            setConnectionMessage('Google Calendar connected.');
+          }
+        }
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : 'Unable to load availability.');
@@ -106,6 +123,49 @@ export default function AvailabilitySettingsPage() {
       cancelled = true;
     };
   }, []);
+
+  const googleConnection = useMemo(
+    () => connections.find((connection) => connection.provider === 'google') ?? null,
+    [connections],
+  );
+
+  async function connectGoogle() {
+    setError(null);
+    setConnectionMessage(null);
+    setIsConnecting(true);
+    try {
+      const returnTo =
+        typeof window !== 'undefined' ? window.location.origin + window.location.pathname : '/';
+      const { authorize_url } = await startGoogleConnect(returnTo);
+      window.location.href = authorize_url;
+    } catch (connectError) {
+      setError(
+        connectError instanceof Error
+          ? connectError.message
+          : 'Unable to start Google connect flow.',
+      );
+      setIsConnecting(false);
+    }
+  }
+
+  async function unlinkGoogle() {
+    setError(null);
+    setConnectionMessage(null);
+    setIsDisconnecting(true);
+    try {
+      await disconnectGoogle();
+      setConnections((current) => current.filter((row) => row.provider !== 'google'));
+      setConnectionMessage('Google Calendar disconnected.');
+    } catch (disconnectError) {
+      setError(
+        disconnectError instanceof Error
+          ? disconnectError.message
+          : 'Unable to disconnect Google.',
+      );
+    } finally {
+      setIsDisconnecting(false);
+    }
+  }
 
   const upcomingBlocks = useMemo(() => {
     const now = Date.now();
@@ -209,6 +269,43 @@ export default function AvailabilitySettingsPage() {
       </div>
 
       {error ? <p className="error-text">{error}</p> : null}
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="section-label">Google Calendar</p>
+            <h2>
+              {googleConnection
+                ? `Connected to ${googleConnection.provider_email ?? googleConnection.provider_account_id}`
+                : 'Connect your calendar'}
+            </h2>
+          </div>
+          {googleConnection ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={isDisconnecting}
+              onClick={unlinkGoogle}
+            >
+              {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={isConnecting}
+              onClick={connectGoogle}
+            >
+              {isConnecting ? 'Redirecting…' : 'Connect Google'}
+            </button>
+          )}
+        </div>
+        <p className="helper-copy privacy-copy">
+          SYZY reads when you’re busy, never event titles. Connecting lets the “Find a time” flow skip
+          slots that overlap an existing meeting. Disconnecting deletes the access token immediately.
+        </p>
+        {connectionMessage ? <p className="success-text">{connectionMessage}</p> : null}
+      </section>
 
       <section className="panel">
         <div className="panel-head">

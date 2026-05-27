@@ -387,6 +387,32 @@ export async function deleteAvailabilityBlock(blockId: string) {
   }
 }
 
+export type CalendarConnectionPayload = {
+  provider: string;
+  provider_account_id: string;
+  provider_email: string | null;
+  connected_at: string | null;
+  expires_at: string | null;
+  scopes: Record<string, string> | null;
+};
+
+export async function getCalendarConnections() {
+  return request<{ connections: CalendarConnectionPayload[] }>(`/v1/calendar/connections`);
+}
+
+export async function startGoogleConnect(returnTo: string) {
+  const query = `?return_to=${encodeURIComponent(returnTo)}`;
+  return request<{ authorize_url: string; state: string }>(
+    `/v1/calendar/google/connect${query}`,
+  );
+}
+
+export async function disconnectGoogle() {
+  return request<{ ok: boolean; revoked: number }>(`/v1/calendar/google/disconnect`, {
+    method: 'POST',
+  });
+}
+
 export async function getEventResponseContext(eventId: string, inviteToken?: string | null) {
   const query = inviteToken ? `?token=${encodeURIComponent(inviteToken)}` : '';
   return request<EventRespondContext>(`/v1/events/${eventId}/respond${query}`);

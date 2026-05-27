@@ -396,6 +396,39 @@ code {
   }
 }
 
+.confirmed-recipients {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.confirmed-recipients li {
+  display: grid;
+  grid-template-columns: minmax(8rem, 14rem) 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+@media (max-width: 800px) {
+  .confirmed-recipients li {
+    grid-template-columns: 1fr;
+  }
+}
+
+.privacy-copy {
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+}
+
 .mode-toggle {
   display: inline-flex;
   border: 1px solid var(--line);
