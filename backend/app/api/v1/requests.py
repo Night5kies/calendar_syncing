@@ -35,17 +35,22 @@ from app.services.meeting_requests import (
     validate_manual_proposal_rules,
 )
 from app.services.scheduling import (
+    Interval,
     generate_suggestions,
     load_organizer_constraints,
     materialize_suggestions,
     parse_inputs_from_payload,
 )
+from app.models.calendar_connection import CalendarConnection
+from app.models.provider_calendar import ProviderCalendar
+from app.providers import google
 from app.services.participants import (
     build_invite_url,
     generate_invite_token,
     normalize_email,
 )
 from app.models.profile import Profile
+from app.services.confirmation_invites import dispatch_confirmation_invites
 from app.services.scheduled_events import finalize_scheduled_event
 
 router = APIRouter()
@@ -444,11 +449,37 @@ def suggest_proposals(
         db, current_user.user_id, range_start, range_end
     )
 
+    google_busy: list[Interval] = []
+    connection = db.execute(
+        select(CalendarConnection).where(
+            CalendarConnection.user_id == current_user.user_id,
+            CalendarConnection.provider == "google",
+            CalendarConnection.revoked_at.is_(None),
+        )
+    ).scalar_one_or_none()
+    if connection and connection.access_token:
+        calendars = (
+            db.execute(
+                select(ProviderCalendar)
+                .where(ProviderCalendar.user_id == current_user.user_id)
+                .where(ProviderCalendar.provider == "google")
+                .where(ProviderCalendar.is_enabled.is_(True))
+            )
+            .scalars()
+            .all()
+        )
+        calendar_ids = [calendar.provider_calendar_id for calendar in calendars] or ["primary"]
+        try:
+            busy = google.fetch_busy_intervals(connection, calendar_ids, range_start, range_end)
+            google_busy = [Interval(start=start, end=end) for start, end in busy]
+        except Exception:  # pragma: no cover - integration path
+            google_busy = []
+
     try:
         suggestions = generate_suggestions(
             inputs,
             organizer_rule=organizer_rule,
-            blocked_intervals=blocked_intervals,
+            blocked_intervals=[*blocked_intervals, *google_busy],
         )
     except ValueError as exc:
         raise HTTPException(
@@ -519,8 +550,13 @@ def finalize_request(
         organizer_email=current_user.email,
         organizer_id=current_user.user_id,
     )
+    db.flush()
+    invites_result = dispatch_confirmation_invites(
+        db,
+        scheduled_event_id=scheduled.id,
+    )
     db.commit()
-    return {"id": str(scheduled.id)}
+    return {"id": str(scheduled.id), "invites": invites_result}
 
 
 @router.post("/{request_id}/reminders/ping")

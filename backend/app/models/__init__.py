@@ -5,6 +5,7 @@ from .calendar_connection import CalendarConnection
 from .calendar_share import CalendarShare
 from .event_cache import EventCache
 from .meeting_request import MeetingRequest
+from .notification_event import NotificationEvent
 from .participant import Participant
 from .profile import Profile
 from .proposal import Proposal

@@ -30,6 +30,17 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
     google_api_base_url: str = "https://www.googleapis.com/calendar/v3"
+    google_oauth_authorize_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    google_oauth_token_url: str = "https://oauth2.googleapis.com/token"
+    google_oauth_userinfo_url: str = "https://www.googleapis.com/oauth2/v3/userinfo"
+    google_client_id: Optional[str] = None
+    google_client_secret: Optional[str] = None
+    google_redirect_uri: str = "http://127.0.0.1:8000/v1/calendar/google/callback"
+    google_oauth_scopes: str = (
+        "openid email profile "
+        "https://www.googleapis.com/auth/calendar.readonly "
+        "https://www.googleapis.com/auth/calendar.events"
+    )
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )

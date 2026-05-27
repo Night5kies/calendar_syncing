@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import smtplib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
@@ -12,6 +12,14 @@ from app.core.config import settings
 
 
 Channel = Literal["email", "sms"]
+
+
+@dataclass
+class EmailAttachment:
+    filename: str
+    media_type: str
+    content: str
+    method: str | None = None  # iTIP method (REQUEST, CANCEL) when applicable
 
 
 @dataclass
@@ -27,17 +35,43 @@ def send_notification(
     subject: str,
     body: str,
     metadata: dict[str, object] | None = None,
+    attachments: list[EmailAttachment] | None = None,
 ) -> DeliveryResult:
     if channel == "sms":
-        return _write_outbox(channel=channel, target=target, subject=subject, body=body, metadata=metadata)
+        return _write_outbox(
+            channel=channel,
+            target=target,
+            subject=subject,
+            body=body,
+            metadata=metadata,
+            attachments=None,
+        )
 
     mode = settings.notification_mode.lower()
     if mode == "smtp":
-        return _send_email_via_smtp(target=target, subject=subject, body=body)
-    return _write_outbox(channel=channel, target=target, subject=subject, body=body, metadata=metadata)
+        return _send_email_via_smtp(
+            target=target,
+            subject=subject,
+            body=body,
+            attachments=attachments,
+        )
+    return _write_outbox(
+        channel=channel,
+        target=target,
+        subject=subject,
+        body=body,
+        metadata=metadata,
+        attachments=attachments,
+    )
 
 
-def _send_email_via_smtp(*, target: str, subject: str, body: str) -> DeliveryResult:
+def _send_email_via_smtp(
+    *,
+    target: str,
+    subject: str,
+    body: str,
+    attachments: list[EmailAttachment] | None = None,
+) -> DeliveryResult:
     if not settings.smtp_host:
         return DeliveryResult(status="failed", detail="smtp_host_not_configured")
 
@@ -46,6 +80,15 @@ def _send_email_via_smtp(*, target: str, subject: str, body: str) -> DeliveryRes
     message["To"] = target
     message["Subject"] = subject
     message.set_content(body)
+
+    for attachment in attachments or []:
+        major, _, minor = attachment.media_type.partition("/")
+        message.add_attachment(
+            attachment.content.encode("utf-8"),
+            maintype=major or "application",
+            subtype=minor or "octet-stream",
+            filename=attachment.filename,
+        )
 
     try:
         if settings.smtp_use_ssl:
@@ -75,6 +118,7 @@ def _write_outbox(
     subject: str,
     body: str,
     metadata: dict[str, object] | None = None,
+    attachments: list[EmailAttachment] | None = None,
 ) -> DeliveryResult:
     outbox_dir = Path(settings.notification_outbox_dir)
     if not outbox_dir.is_absolute():
@@ -91,6 +135,15 @@ def _write_outbox(
         "subject": subject,
         "body": body,
         "metadata": metadata or {},
+        "attachments": [
+            {
+                "filename": attachment.filename,
+                "media_type": attachment.media_type,
+                "content": attachment.content,
+                "method": attachment.method,
+            }
+            for attachment in (attachments or [])
+        ],
     }
     filename.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return DeliveryResult(status="sent", detail=str(filename))

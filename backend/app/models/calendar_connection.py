@@ -1,4 +1,6 @@
 import uuid
+from datetime import datetime
+
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -15,8 +17,11 @@ class CalendarConnection(Base):
     )
     provider: Mapped[str] = mapped_column(String(32))
     provider_account_id: Mapped[str] = mapped_column(String(255))
+    provider_email: Mapped[str | None] = mapped_column(String(320))
     access_token: Mapped[str | None] = mapped_column(Text)
     refresh_token: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scopes: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now())
     revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))

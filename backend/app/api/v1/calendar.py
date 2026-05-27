@@ -1,24 +1,47 @@
+import base64
+import json
+import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_current_user
+from app.core.config import settings
 from app.db.deps import get_db
 from app.models.availability_block import AvailabilityBlock
 from app.models.busy_cache import BusyCache
 from app.models.calendar_connection import CalendarConnection
 from app.models.calendar_share import CalendarShare
 from app.models.event_cache import EventCache
+from app.models.profile import Profile
 from app.models.provider_calendar import ProviderCalendar
 from app.providers import google
 from app.schemas.calendar import CalendarShareCreate, CalendarToggle
 from app.services.calendar import is_cache_stale, merge_intervals, redact_events_for_permission
 
 router = APIRouter(prefix="/calendar")
+
+
+def _encode_state(user_id: uuid.UUID, return_to: str | None) -> str:
+    raw = json.dumps(
+        {
+            "uid": str(user_id),
+            "nonce": secrets.token_urlsafe(16),
+            "return_to": return_to or settings.app_base_url,
+        }
+    ).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_state(state: str) -> dict:
+    padded = state + "=" * (-len(state) % 4)
+    raw = base64.urlsafe_b64decode(padded.encode())
+    return json.loads(raw)
 
 
 def parse_iso(value: str) -> datetime:
@@ -423,3 +446,147 @@ def list_shares(
             for row in incoming
         ],
     }
+
+
+@router.get("/connections")
+def list_connections(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    rows = db.execute(
+        select(CalendarConnection).where(
+            CalendarConnection.user_id == current_user.user_id,
+            CalendarConnection.revoked_at.is_(None),
+        )
+    ).scalars().all()
+    return {
+        "connections": [
+            {
+                "provider": row.provider,
+                "provider_account_id": row.provider_account_id,
+                "provider_email": row.provider_email,
+                "connected_at": row.created_at,
+                "expires_at": row.expires_at,
+                "scopes": row.scopes,
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.get("/google/connect")
+def google_connect(
+    return_to: str | None = None,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "google_oauth_not_configured",
+                "message": "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to enable Google connect.",
+            },
+        )
+    state = _encode_state(current_user.user_id, return_to)
+    return {"authorize_url": google.build_authorize_url(state), "state": state}
+
+
+@router.get("/google/callback")
+def google_callback(
+    code: str = Query(...),
+    state: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        decoded = _decode_state(state)
+        user_id = uuid.UUID(decoded["uid"])
+    except (KeyError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid state") from exc
+
+    return_to = decoded.get("return_to") or settings.app_base_url
+
+    try:
+        token_payload = google.exchange_code_for_tokens(code)
+    except Exception as exc:  # pragma: no cover - integration path
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    access_token = token_payload.get("access_token")
+    refresh_token = token_payload.get("refresh_token")
+    expires_in = token_payload.get("expires_in")
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+        if isinstance(expires_in, (int, float))
+        else None
+    )
+    scope = token_payload.get("scope")
+
+    provider_account_id = None
+    provider_email = None
+    if access_token:
+        try:
+            info = google.fetch_userinfo(access_token)
+            provider_account_id = info.get("sub")
+            provider_email = info.get("email")
+        except Exception:  # pragma: no cover - integration path
+            pass
+
+    profile_row = db.get(Profile, user_id)
+    if profile_row is None:
+        # dev-auth path: organizer profile row may not exist yet
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="organizer not found")
+
+    existing = db.execute(
+        select(CalendarConnection).where(
+            CalendarConnection.user_id == user_id,
+            CalendarConnection.provider == "google",
+        )
+    ).scalar_one_or_none()
+
+    if existing is None:
+        existing = CalendarConnection(
+            user_id=user_id,
+            provider="google",
+            provider_account_id=provider_account_id or "",
+            provider_email=provider_email,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at=expires_at,
+            scopes={"granted": scope} if scope else None,
+            revoked_at=None,
+        )
+        db.add(existing)
+    else:
+        existing.provider_account_id = provider_account_id or existing.provider_account_id
+        existing.provider_email = provider_email or existing.provider_email
+        existing.access_token = access_token or existing.access_token
+        if refresh_token:
+            existing.refresh_token = refresh_token
+        if expires_at:
+            existing.expires_at = expires_at
+        if scope:
+            existing.scopes = {"granted": scope}
+        existing.revoked_at = None
+
+    db.commit()
+    return RedirectResponse(url=f"{return_to}?google=connected", status_code=302)
+
+
+@router.post("/google/disconnect")
+def google_disconnect(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    rows = db.execute(
+        select(CalendarConnection).where(
+            CalendarConnection.user_id == current_user.user_id,
+            CalendarConnection.provider == "google",
+            CalendarConnection.revoked_at.is_(None),
+        )
+    ).scalars().all()
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        row.revoked_at = now
+        row.access_token = None
+        row.refresh_token = None
+    db.commit()
+    return {"ok": True, "revoked": len(rows)}
