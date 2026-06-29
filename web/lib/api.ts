@@ -11,7 +11,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `Request failed: ${response.status}`);
+    let message = text || `Request failed: ${response.status}`;
+    // FastAPI returns errors as {"detail": "..."}; surface that instead of raw JSON.
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown };
+      if (typeof parsed.detail === 'string') {
+        message = parsed.detail;
+      }
+    } catch {
+      // not JSON — keep the raw text
+    }
+    throw new Error(message);
   }
 
   return response.json() as Promise<T>;

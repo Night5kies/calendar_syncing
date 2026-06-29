@@ -30,12 +30,18 @@ export default function LegacyRespondRedirect() {
     };
   }, [router, token]);
 
+  const expired = !!error && /expired/i.test(error);
+  const heading = error ? (expired ? 'This link has expired' : 'Unable to load link') : 'Redirecting...';
+  const detail = expired
+    ? 'Ask the organizer to share a fresh link.'
+    : error;
+
   return (
     <main className="shell shell-narrow">
       <div className="page-head">
         <p className="eyebrow">Attendee view</p>
-        <h1>{error ? 'Unable to load link' : 'Redirecting...'}</h1>
-        {error ? <p className="error-text">{error}</p> : null}
+        <h1>{heading}</h1>
+        {error ? <p className="error-text">{detail}</p> : null}
       </div>
     </main>
   );
