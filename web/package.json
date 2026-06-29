@@ -11,6 +11,7 @@
     "test:e2e:install": "playwright install --with-deps"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
     "next": "15.4.11",
     "react": "19.1.1",
     "react-dom": "19.1.1"

@@ -1,10 +1,17 @@
+import { getAccessToken } from './supabase';
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = await getAccessToken();
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      // When signed in (auth enabled), attach the Supabase bearer token.
+      // When auth is disabled, getAccessToken() returns null and the backend
+      // dev-auth fallback applies.
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
   });
