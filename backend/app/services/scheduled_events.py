@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import timezone
 from pathlib import Path
@@ -15,6 +16,9 @@ from app.models.scheduled_event import ScheduledEvent
 from app.providers import google
 from app.services.confirmation_artifacts import artifact_filename, build_ics_body, ensure_artifact_dir
 from app.services.meeting_requests import compute_end_at
+from app.services.retry import retry_call
+
+logger = logging.getLogger(__name__)
 
 
 def finalize_scheduled_event(
@@ -37,10 +41,22 @@ def finalize_scheduled_event(
         calendar_id = choose_google_calendar_id(db, organizer_id)
         if calendar_id:
             try:
-                created = create_google_calendar_event(connection, calendar_id, scheduled_event, artifact_uid, organizer_email)
+                created = retry_call(
+                    lambda: create_google_calendar_event(
+                        connection, calendar_id, scheduled_event, artifact_uid, organizer_email
+                    )
+                )
                 provider = "google"
                 provider_event_id = created.get("id")
-            except Exception:  # pragma: no cover - integration path
+            except Exception:
+                # Write-back is best-effort: the ICS artifact already exists and
+                # the event is confirmed regardless. Log loudly so the failure is
+                # not silent (organizer's calendar simply won't have the event).
+                logger.warning(
+                    "Google Calendar write-back failed for scheduled_event %s after retries",
+                    scheduled_event.id,
+                    exc_info=True,
+                )
                 provider = None
                 provider_event_id = None
 

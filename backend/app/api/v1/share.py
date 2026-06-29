@@ -23,8 +23,19 @@ from app.services.participants import (
     resolve_participant,
     send_magic_respond_link,
 )
+from app.services.share_links import compute_expires_at, is_share_link_expired
 
 router = APIRouter()
+
+
+def load_active_share_link(db: Session, token: str) -> ShareLink:
+    """Fetch a share link by token, 404 if missing and 410 if expired."""
+    link = db.query(ShareLink).filter(ShareLink.token == token).first()
+    if not link:
+        raise HTTPException(status_code=404, detail="invalid token")
+    if is_share_link_expired(link):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="share link expired")
+    return link
 
 
 class PublicResponseCreate(BaseModel):
@@ -54,7 +65,8 @@ def create_share_link(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="request not found")
 
     token = secrets.token_urlsafe(32)[:48]
-    link = ShareLink(meeting_request_id=req.id, token=token)
+    expires_at = compute_expires_at(datetime.now(timezone.utc), settings.share_link_ttl_days)
+    link = ShareLink(meeting_request_id=req.id, token=token, expires_at=expires_at)
     db.add(link)
     if req.status == "draft":
         req.status = "sent"
@@ -67,9 +79,7 @@ def create_share_link(
 
 @router.get("/public/{token}")
 def get_share(token: str, db: Session = Depends(get_db)):
-    link = db.query(ShareLink).filter(ShareLink.token == token).first()
-    if not link:
-        raise HTTPException(status_code=404, detail="invalid token")
+    link = load_active_share_link(db, token)
     req = db.get(MeetingRequest, link.meeting_request_id)
     proposals = (
         db.execute(
@@ -143,9 +153,7 @@ def submit_public_response(token: str, payload: PublicResponseCreate, db: Sessio
     resolution stays consistent regardless of which URL the
     attendee landed on.
     """
-    link = db.query(ShareLink).filter(ShareLink.token == token).first()
-    if not link:
-        raise HTTPException(status_code=404, detail="invalid token")
+    link = load_active_share_link(db, token)
 
     req = db.get(MeetingRequest, link.meeting_request_id)
     if not req:

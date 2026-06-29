@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
 from app.db.session import SessionLocal
 from app.models.meeting_request import MeetingRequest
@@ -22,6 +23,11 @@ class ParticipantResolutionTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.db = SessionLocal()
+        try:
+            self.db.connection()
+        except OperationalError as exc:
+            self.db.close()
+            self.skipTest(f"Postgres not reachable for db-backed test: {exc}")
         self.event = MeetingRequest(
             organizer_id=uuid.uuid4(),
             title="Test event",

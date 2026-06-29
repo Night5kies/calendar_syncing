@@ -7,6 +7,7 @@ from app.db.session import SessionLocal
 from app.models.meeting_request import MeetingRequest
 from app.services.confirmation_invites import dispatch_confirmation_invites
 from app.services.meeting_requests import dispatch_request_reminders, due_requests_stmt
+from app.services.share_links import delete_expired_share_links
 from app.workers.celery_app import celery
 
 
@@ -26,6 +27,14 @@ def enqueue_due_reminders() -> dict:
             reason = "deadline" if meeting_request.response_deadline and meeting_request.response_deadline <= now else "scheduled"
             results.append(_send_request_reminders(db, str(meeting_request.id), reason))
         return {"processed": len(results), "results": results}
+
+
+@celery.task
+def cleanup_expired_share_links() -> dict:
+    with SessionLocal() as db:
+        deleted = delete_expired_share_links(db)
+        db.commit()
+        return {"deleted": deleted}
 
 
 @celery.task

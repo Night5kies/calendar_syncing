@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     dev_user_email: str = "local-organizer@syzy.dev"
     app_base_url: str = "http://127.0.0.1:3000"
     api_base_url: str = "http://127.0.0.1:8000"
+    reminder_sweep_interval_minutes: int = 15
+    share_link_ttl_days: int = 30
     notification_mode: str = "file"
     notification_from_email: str = "noreply@syzy.dev"
     notification_outbox_dir: str = "dev_outbox"
@@ -42,7 +44,15 @@ class Settings(BaseSettings):
         "https://www.googleapis.com/auth/calendar.events"
     )
     cors_origins: list[str] = Field(
-        default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            # Playwright e2e boots the Next.js dev server on port 3100
+            # (see calendar_syncing_app_web/playwright.config.ts). Without these
+            # origins the browser-side fetches in the e2e suite are CORS-blocked.
+            "http://localhost:3100",
+            "http://127.0.0.1:3100",
+        ]
     )
 
     class Config:
