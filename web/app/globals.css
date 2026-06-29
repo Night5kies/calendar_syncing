@@ -5,9 +5,11 @@
   --surface-strong: #f4ead8;
   --panel: rgba(255, 255, 255, 0.78);
   --line: rgba(24, 35, 47, 0.12);
-  --accent: #d95d39;
+  /* Darkened from #d95d39 so white text on the primary button clears WCAG AA
+     (4.5:1); the old value measured 3.76:1. */
+  --accent: #c0492a;
   --accent-dark: #9f3216;
-  --accent-soft: rgba(217, 93, 57, 0.12);
+  --accent-soft: rgba(192, 73, 42, 0.12);
   --success: #1a7f53;
   --shadow: 0 24px 60px rgba(24, 35, 47, 0.12);
 }
