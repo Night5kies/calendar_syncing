@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     smtp_password: Optional[str] = None
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
+    # SMS delivery: "file" writes to the outbox (default), "twilio" sends live.
+    sms_mode: str = "file"
+    twilio_account_sid: Optional[str] = None
+    twilio_auth_token: Optional[str] = None
+    twilio_from_number: Optional[str] = None
     google_api_base_url: str = "https://www.googleapis.com/calendar/v3"
     google_oauth_authorize_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
     google_oauth_token_url: str = "https://oauth2.googleapis.com/token"

@@ -8,6 +8,8 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Literal
 
+import httpx
+
 from app.core.config import settings
 
 
@@ -38,6 +40,8 @@ def send_notification(
     attachments: list[EmailAttachment] | None = None,
 ) -> DeliveryResult:
     if channel == "sms":
+        if settings.sms_mode.lower() == "twilio":
+            return _send_sms_via_twilio(target=target, body=body)
         return _write_outbox(
             channel=channel,
             target=target,
@@ -63,6 +67,41 @@ def send_notification(
         metadata=metadata,
         attachments=attachments,
     )
+
+
+def build_twilio_payload(
+    *, account_sid: str, auth_token: str, from_number: str, to: str, body: str
+) -> tuple[str, dict[str, str], tuple[str, str]]:
+    """URL, form data, and basic-auth tuple for a Twilio Messages request."""
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+    data = {"From": from_number, "To": to, "Body": body}
+    auth = (account_sid, auth_token)
+    return url, data, auth
+
+
+def _send_sms_via_twilio(*, target: str, body: str) -> DeliveryResult:
+    if not (
+        settings.twilio_account_sid
+        and settings.twilio_auth_token
+        and settings.twilio_from_number
+    ):
+        return DeliveryResult(status="failed", detail="twilio_not_configured")
+
+    url, data, auth = build_twilio_payload(
+        account_sid=settings.twilio_account_sid,
+        auth_token=settings.twilio_auth_token,
+        from_number=settings.twilio_from_number,
+        to=target,
+        body=body,
+    )
+    try:
+        response = httpx.post(url, data=data, auth=auth, timeout=10.0)
+    except Exception as exc:  # pragma: no cover - integration path
+        return DeliveryResult(status="failed", detail=str(exc))
+
+    if response.status_code >= 400:
+        return DeliveryResult(status="failed", detail=f"twilio_http_{response.status_code}")
+    return DeliveryResult(status="sent")
 
 
 def _send_email_via_smtp(
