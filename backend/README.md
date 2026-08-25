@@ -118,6 +118,26 @@ that the *right* thing was queued, not just that the call returned 200.
 
 ## Full local test sequence
 
+### The scripted path
+
+`setup-local.ps1` in the workspace root does everything below in one command —
+prerequisites, Docker daemon, containers, dependencies, migrations, the test
+suite, then launches the api, worker, beat, and web dev server in separate
+windows and health-checks them:
+
+```powershell
+# from the workspace root (one level up)
+.\setup-local.ps1
+.\setup-local.ps1 -NoLaunch    # provision only
+.\setup-local.ps1 -FullTest    # also run the Playwright suite
+```
+
+It is idempotent — re-running skips anything already up. Note it lives in the
+workspace meta-folder, which is not a Git repo, so it is not version-controlled
+with this project.
+
+### The manual path
+
 Start to finish, assuming Docker Desktop is already running:
 
 ```powershell
