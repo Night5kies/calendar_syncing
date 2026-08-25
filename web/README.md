@@ -94,6 +94,23 @@ Env knobs: `E2E_PORT` (default `3100`), `E2E_BASE_URL`, `E2E_API_BASE_URL`
 
 ## Full local test sequence
 
+### The scripted path
+
+`setup-local.ps1` in the workspace root brings up the whole stack — backend,
+worker, beat, and this dev server — in one command, then health-checks it:
+
+```powershell
+# from the workspace root (two levels up from here)
+.\setup-local.ps1
+.\setup-local.ps1 -FullTest    # also runs the Playwright suite
+```
+
+It is idempotent, and skips any process already listening on its port. Note it
+lives in the workspace meta-folder, which is not a Git repo, so it is not
+version-controlled with this project.
+
+### The manual path
+
 With the backend, worker, and beat already running (see the backend README):
 
 ```powershell
