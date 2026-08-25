@@ -125,6 +125,18 @@ class DeleteExpiredShareLinksTests(unittest.TestCase):
 
     def test_deletes_only_expired_links(self) -> None:
         now = datetime.now(timezone.utc)
+
+        # The cleanup job deletes across the whole table, not just this event's
+        # rows, so a long-lived dev database will already hold expired links
+        # from earlier runs. Baseline them first (mirroring the job's own
+        # filter) so the count assertion measures what this test created rather
+        # than whatever happens to be sitting in the database.
+        pre_existing_expired = (
+            self.db.query(ShareLink)
+            .filter(ShareLink.expires_at.is_not(None), ShareLink.expires_at <= now)
+            .count()
+        )
+
         self._link("expired-1", now - timedelta(days=2))
         self._link("expired-2", now - timedelta(seconds=1))
         self._link("active", now + timedelta(days=5))
@@ -132,7 +144,7 @@ class DeleteExpiredShareLinksTests(unittest.TestCase):
 
         deleted = delete_expired_share_links(self.db, now=now)
 
-        self.assertEqual(deleted, 2)
+        self.assertEqual(deleted, pre_existing_expired + 2)
         remaining = {
             link.token
             for link in self.db.query(ShareLink)
