@@ -1,0 +1,401 @@
+﻿Absolutely — here’s a Next.js-first version of your PRD, keeping the product logic basically the same but changing the platform strategy, launch assumptions, and a few product decisions to better fit a web-first, link-first scheduling product.
+________________
+
+
+Product Requirements Document (PRD) — SYZY Social Scheduling (Next.js-first)
+Document status
+Finalized for MVP + V1 roadmap (survey-adjusted, web-first revision).
+________________
+
+
+1) Product Overview
+Summary
+SYZY is a web-first social scheduling app that helps friends actually follow through on “let’s grab a meal” by making group scheduling fast, low-effort, and privacy-preserving. It generates good time options, collects quick responses via link, nudges people who forget, and books the final plan to the organizer’s calendar.
+The product is Next.js-first, meaning the primary experience is a shareable web app optimized for mobile browsers, with optional PWA/app-like behavior later.
+Problem (survey-grounded)
+From 119 responses:
+People often intend to follow up (“sometimes” 62.2%, “always” 25.2%), but fail due to:
+* being busy / time constraints
+* forgetfulness
+* mental burden / back-and-forth stress
+Scheduling is usually done by texting (“I just text them” 36.1%), and groups are hard (“after a lot of back and forth” 58.8%).
+When2meet is used but disliked (47.1%).
+Google Calendar is dominant (77.3%).
+Many worry about maintaining relationships after college (68.9%).
+Product positioning
+“Text-level simplicity, When2meet-level coordination, with calendar-grade follow-through.”
+Platform positioning
+SYZY is designed primarily for:
+* mobile web usage through shared links
+* fast participation with no app download required
+* lightweight organizer workflows that can later expand into a richer account-based product
+This is a deliberate product decision: for social scheduling, the first interaction is often “someone sends me a link”, not “download this app.”
+________________
+
+
+2) Goals, Non-Goals, and Success Criteria
+Goals (MVP)
+* Reduce back-and-forth for groups (core pain)
+* Make follow-through automatic via reminders and lightweight accountability
+* Keep calendars private by default (availability, not event titles)
+* Work without accounts for attendees (link-based responses)
+* Integrate with Google Calendar for organizers (dominant tool in survey)
+* Create a confirmed plan that feels “real” (calendar event + invite/ICS)
+* Optimize for instant access from texted/shared links on mobile web
+Other Goals (Post MVP)
+* Native mobile packaging / installable app experience
+* Full social network / friend graph
+* Full calendar detail sharing (event names)
+* Auto-book events onto attendees’ calendars
+* Outlook + Apple Calendar integrations
+* Full in-app chat threads
+Success metrics (MVP)
+Product outcomes
+* Request→Confirmed conversion
+* Median time from Sent→Confirmed
+* Number of messages saved proxy: fewer proposals/clarifications needed
+* Nudge effectiveness: % of confirmations where at least one reminder was sent and led to response
+Experience metrics
+* Attendee response completion rate (no account)
+* Drop-off rate on link landing page
+* Mobile web completion time from open → response
+* “This made it easier” self-report (post-confirm mini prompt)
+Reliability
+* Organizer calendar write-back success rate
+* Share-link response success rate
+* Job retry rate + failure rate
+* Page load / interaction reliability on mobile browsers
+________________
+
+
+3) Target Users & Core Use Cases
+Primary segment (based on survey demographics)
+College students / young adults coordinating:
+* meals (most common)
+* outings
+* student org / small group meetups
+Core use cases (MVP)
+* “Let’s grab food” group scheduling (2–8 people)
+* Student org / project group meeting (4–20 people, poll-style)
+* 1:1 meetup (supported, but not the wedge)
+Primary entry point
+The primary entry point is:
+* organizer creates request
+* organizer shares link via text/group chat
+* attendees respond instantly in mobile web
+Not:
+* browse app store
+* install app
+* create account before responding
+________________
+
+
+4) Key Product Principles (survey-driven)
+* Link-first UX: creating and sharing should feel like sending a link in a text.
+* Fast responses: one tap to respond; no account required.
+* Nudges remove forgetfulness: reminders are essential, not optional.
+* Privacy by default: show availability, not calendar details.
+* Make it feel real: calendar write-back + invite after confirmation.
+* Web-native simplicity: every core flow should work cleanly in mobile browser without requiring installation.
+________________
+
+
+5) MVP Scope (Updated)
+MVP includes
+A) Request creation optimized for social plans
+Quick templates:
+* Meal
+* Coffee
+* Study
+* Hangout
+Defaults tuned for meals:
+* duration default 60–90 minutes (configurable)
+* suggested windows (e.g. lunch/dinner) based on template
+Participants:
+* add via contact list, phone, or email
+* attendees do not need accounts
+B) Proposals: auto + manual
+* “Find a time” generates ranked slots using constraints + organizer availability rules/blocks
+* “Poll” for larger groups where the organizer wants to propose options manually
+C) Link-based responses
+* Pick / Maybe / None work
+* Show attendee-local time always
+* Mobile-web-optimized response page
+* No login required for first response
+D) Reminders + accountability (MVP)
+Because “forgetting” and “mental burden” showed up strongly:
+* automatic reminder to non-responders (configurable by organizer)
+* organizer nudge button: “Ping non-responders”
+* soft accountability cues:
+   * “3/6 responded” progress
+   * optional deadline (“respond by tonight”)
+E) Confirmation + write-back
+* organizer confirms a winner
+* backend creates event on organizer Google Calendar
+* send ICS invites to all via email
+* SMS later
+F) Built-in availability editor (privacy layer)
+* working hours
+* private blocks/holds
+MVP explicitly excludes
+* native iOS app as the primary product surface
+* friend graph + persistent sharing
+* attendee calendar connections + booking on their calendars
+* messaging thread (beyond optional comments on responses)
+* install requirement before participation
+________________
+
+
+6) Functional Requirements (MVP)
+6.1 Meeting Request Creation
+Required:
+* title
+* duration_min
+* timezone
+* participants
+Optional:
+* location
+* video_link
+* notes
+* event_type/template (meal/coffee/etc.)
+* response_deadline
+Constraints:
+* date range
+* days of week
+* time-of-day windows (multiple)
+* preferred dates/times (multiple)
+* exclude dates
+Send behavior:
+* draft → sent
+* generate share link(s)
+* begin reminder schedule if enabled
+6.2 Participants
+* support account + no-account
+* enforce unique contact_key per request
+* attendees can respond through secure tokenized links without signup
+6.3 Proposals + Locking
+* proposals are immutable after send
+* organizer may edit non-structural details (notes/location)
+* to change times: cancel or create a new request (MVP)
+6.4 Responses
+Each attendee can submit exactly one response (update-in-place):
+* picked (proposal_id required)
+* maybe (proposal_id optional)
+* declined (proposal_id null)
+Optional comment:
+* “can’t do weekdays”
+* “after 7 only”
+6.5 Reminder System (MVP requirement)
+Reminder rules
+Default:
+* remind non-responders once after X hours (e.g. 12h)
+* remind again before deadline
+Organizer can:
+* toggle reminders on/off
+* set a deadline
+* manually “Ping non-responders”
+Reminder channels (MVP)
+* email reminders for email participants
+* shareable reminder-friendly link experience
+* optional SMS only if infra exists; otherwise V1
+Anti-spam guardrails
+* max reminders per participant per request
+* do not message someone who declined unless organizer explicitly reopens later
+6.6 Winner Selection
+* organizer manually confirms winner
+* if any attendee picked non-rank-1 proposal → needs_organizer_confirm
+6.7 Calendar Integration
+Google Calendar is first-class (77.3% usage)
+* Read: free/busy when connected (avoid titles)
+* Write-back: create organizer event + send ICS to all
+6.8 Web App Requirements
+Because the product is Next.js-first, the MVP must support:
+* responsive mobile-first pages
+* reliable deep links to request/respond flows
+* fast page load for first-time visitors
+* secure tokenized access for attendee response pages
+* browser-safe auth/session handling for organizers
+* support for being shared/opened from iMessage, SMS, WhatsApp, Messenger, etc.
+________________
+
+
+7) State Machine
+Statuses:
+* draft
+* sent
+* collecting
+* needs_organizer_confirm
+* confirmed
+* canceled
+* expired (optional)
+Add:
+* reminder job runs only in sent / collecting / needs_organizer_confirm
+No change to core workflow logic.
+________________
+
+
+8) Scheduling Engine (MVP, tuned for groups)
+Inputs
+* constraints + templates (meal windows)
+* organizer availability (rules/blocks + optional free/busy)
+* attendee response signals once available
+Algorithm
+* deterministic slot generation at 15-min increments
+Scoring prioritizes:
+* preferred windows (template)
+* sooner times (reduce drop-off)
+* “popular” picks once responses arrive
+Transparent meta reasons stored.
+________________
+
+
+9) Data Model (Survey-driven additions)
+Your schema remains broadly strong; keep the reminder + template additions and add the minimum web-first/session-linking support needed.
+meeting_requests (additions)
+* created_via (find_time|proposal|poll)
+* template (meal|coffee|study|hangout|null)
+* response_deadline_at (timestamptz nullable)
+* reminders_enabled (bool default true)
+* reminder_policy (jsonb nullable)
+Example:
+{ "initial_hours": 12, "followup_hours": 24, "max_per_participant": 2 }
+participants (additions)
+* preferred_channel (email|sms|null) optional
+* last_reminded_at (timestamptz nullable)
+* reminder_count (int default 0)
+share_links
+Should now be treated as a first-class surface in the product, not just a utility table.
+Recommended fields:
+* id (uuid PK)
+* meeting_request_id
+* participant_id nullable
+* token_hash
+* purpose (respond|view|organizer_access)
+* expires_at nullable
+* revoked_at nullable
+* created_at
+* last_accessed_at nullable
+notification_events
+Purpose: audit + idempotency for reminders and invites.
+Fields:
+* id (uuid PK)
+* meeting_request_id
+* participant_id nullable
+* type (reminder|invite|update)
+* channel (email|sms)
+* status (queued|sent|failed)
+* provider_message_id (text nullable)
+* created_at
+* updated_at
+Everything else (proposals, proposal_responses, scheduled_events, availability_*) stays largely the same.
+________________
+
+
+10) API Requirements
+Add / keep:
+* POST /meeting_requests/{id}/ping
+organizer manual ping non-responders
+* PATCH /meeting_requests/{id}/reminders
+toggle + set deadline/policy
+* GET /meeting_requests/{id}/progress
+responded count, outstanding list
+Web-first additions:
+   * GET /r/{token}
+attendee response landing route
+   * POST /responses/{token}
+submit/update attendee response through secure token flow
+   * GET /organize/{token} or authenticated organizer route
+organizer quick-access flow from shared/re-entry links
+Whether these are literal REST endpoints or app-router/server-action equivalents can be decided during implementation.
+________________
+
+
+11) Background Jobs (expanded)
+Jobs:
+      * reminder scheduler (find non-responders; send email; log notification_events)
+      * send invites/ICS on confirm
+      * calendar write-back + retries
+      * token refresh
+      * free/busy fetch
+      * expired-link cleanup / optional token rotation logic
+Idempotency
+      * reminders keyed by (meeting_request_id, participant_id, reminder_sequence)
+      * invites keyed by scheduled_event_id
+________________
+
+
+12) Privacy & Trust
+Keep the privacy-first defaults:
+      * free/busy only when reading calendars
+      * do not expose event titles to other attendees
+      * share links are secret tokens
+      * clear UI copy: “SYZY shows availability, not your event details.”
+Web-first trust additions:
+      * attendee links should reveal only the minimum necessary meeting info
+      * tokens should be scoped and revocable
+      * organizer-only actions must require authenticated or privileged access
+      * no public indexability of private scheduling pages
+________________
+
+
+13) Launch Plan (survey-aligned, web-first)
+Phase 0
+Manual poll + link responses + reminders (no calendar)
+Phase 1
+Templates (meal/coffee) + scheduling engine + availability editor
+Phase 2
+Google connect (organizer) + better slot ranking
+Phase 3
+Write-back + invites (make it “real”)
+Phase 4
+Group enhancements + Outlook + installable PWA / optional native wrapper exploration
+________________
+
+
+14) Product Decisions Locked In
+      * Product is Next.js-first / web-first
+      * Link response flow is the primary attendee experience
+      * No install required for MVP participation
+      * Proposals locked after send
+      * No auto-confirm in MVP
+      * Participant list visible in MVP
+      * Reminders are part of MVP (not optional)
+________________
+
+
+15) V1 Addendum: Close Friends “Find My Calendar” Sharing
+Based on your idea, keep it as a roadmap item:
+Tier A (V1)
+Persistent availability sharing (busy/free only)
+Tier B (V2+)
+Full details sharing (titles) for explicit close relationships
+Because the product is web-first, this feature should initially work through:
+      * account-based dashboard views
+      * permissioned web sharing
+      * mobile-friendly friend access links where appropriate
+________________
+
+
+16) Technical/Product Implications of Going Next.js-first
+This section is new and worth making explicit.
+Why this shift is intentional
+A web-first product reduces the biggest source of friction in social scheduling:
+      * no app download
+      * no onboarding wall for attendees
+      * easier sharing in existing group chats
+      * faster iteration on organizer + attendee flows
+Implications
+      * mobile browser UX quality is mission-critical
+      * deep-link reliability matters a lot
+      * page speed matters a lot
+      * organizer auth should be lightweight but secure
+      * the product should be architected so native packaging can be added later if useful, but not required for MVP success
+Product principle update
+SYZY should feel like:
+      * as easy to open as a link
+      * as easy to answer as a poll
+      * as trustworthy as a calendar tool
+________________
+
+
+If you want, I can also turn this into a clean founder-style PRD with tighter wording and less repetition, so it reads more like something you’d actually hand to engineers or put in Notion.

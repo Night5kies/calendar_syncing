@@ -1,0 +1,12 @@
+[submodule "backend"]
+	path = backend
+	url = git@github.com:Night5kies/calendar_syncing_app_backend.git
+	branch = kevin-dev
+[submodule "app"]
+	path = app
+	url = git@github.com:Night5kies/calendar_syncing_app.git
+	branch = master
+[submodule "web"]
+	path = web
+	url = git@github.com:Night5kies/calendar_syncing_app_web.git
+	branch = master
