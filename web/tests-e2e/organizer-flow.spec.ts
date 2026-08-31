@@ -16,7 +16,7 @@ test.describe('organizer + attendee flow', () => {
     const seed = await seedRequestViaApi();
     await page.goto(`/events/${seed.requestId}/respond?token=${seed.inviteToken}`);
     await expect(page.getByText(/Responding as/i)).toBeVisible();
-    await expect(page.getByText(/Choose an option/i)).toBeVisible();
+    await expect(page.getByText(/Pick what works/i)).toBeVisible();
     await expect(page.getByText(/Option 1/i)).toBeVisible();
   });
 
@@ -35,7 +35,7 @@ test.describe('organizer + attendee flow', () => {
     await finalizeRequestViaApi(seed.requestId, seed.proposalId);
 
     await page.goto(`/request/${seed.requestId}`);
-    await expect(page.getByText(/Booked artifact/i)).toBeVisible();
-    await expect(page.getByText(/Open attendee view/i)).toBeVisible();
+    await expect(page.getByText(/It.s booked/i)).toBeVisible();
+    await expect(page.getByRole('link', { name: /Open attendee view/i })).toBeVisible();
   });
 });

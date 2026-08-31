@@ -12,26 +12,21 @@ import {
   type OrganizerRequestDetail,
   type ReminderPolicy,
 } from '../../../lib/api';
-import { formatDateTime, formatRange } from '../../../lib/types';
+import { rememberRequest } from '../../../lib/recents';
+import { Slot, SlotChoice, Tally, type SlotState } from '../../../components/Slot';
+import { formatDuration, formatMoment, relativeTime, shapeSlot, zoneLabel } from '../../../lib/time';
 
-function describeReminderReason(reason: string): string {
+function reminderReason(reason: string): string {
   switch (reason) {
     case 'manual_ping':
-      return 'Manual ping';
+      return 'you nudged them';
     case 'deadline':
-      return 'Deadline reminder';
+      return 'deadline is close';
     case 'scheduled':
-      return 'Scheduled reminder';
+      return 'scheduled follow-up';
     default:
       return reason;
   }
-}
-
-function describeReminderStatus(status: string): string {
-  if (!status) {
-    return 'queued';
-  }
-  return status;
 }
 
 function toLocalDateTimeInput(iso: string | null) {
@@ -46,13 +41,39 @@ function toLocalDateTimeInput(iso: string | null) {
   )}:${pad(date.getMinutes())}`;
 }
 
+function personName(person: {
+  display_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}): string {
+  return person.display_name ?? person.email ?? person.phone ?? 'Guest';
+}
+
+async function copyToClipboard(value: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch {
+    // Older browsers and insecure origins have no clipboard API.
+    const field = document.createElement('textarea');
+    field.value = value;
+    field.setAttribute('readonly', '');
+    field.style.position = 'fixed';
+    field.style.opacity = '0';
+    document.body.appendChild(field);
+    field.select();
+    document.execCommand('copy');
+    document.body.removeChild(field);
+  }
+}
+
 export default function RequestDetailPage() {
   const params = useParams<{ id: string }>();
   const requestId = Array.isArray(params.id) ? params.id[0] : params.id;
   const [request, setRequest] = useState<OrganizerRequestDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [loadingProposalId, setLoadingProposalId] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [shortlistId, setShortlistId] = useState<string | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
   const [pingMessage, setPingMessage] = useState<string | null>(null);
   const [isPinging, setIsPinging] = useState(false);
   const [remindersEnabledDraft, setRemindersEnabledDraft] = useState(true);
@@ -72,10 +93,16 @@ export default function RequestDetailPage() {
         const next = await getOrganizerRequest(requestId);
         if (!cancelled) {
           setRequest(next);
+          rememberRequest({
+            id: next.id,
+            title: next.title,
+            createdAt: new Date().toISOString(),
+            status: next.status,
+          });
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : 'Unable to load request.');
+          setError(loadError instanceof Error ? loadError.message : 'Could not load this request.');
         }
       }
     }
@@ -99,25 +126,26 @@ export default function RequestDetailPage() {
     });
   }, [request]);
 
-  async function copySharePath() {
-    if (!request?.share) {
-      return;
-    }
-    await navigator.clipboard.writeText(request.share.url);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1200);
+  async function copy(value: string, key: string) {
+    await copyToClipboard(value);
+    setCopied(key);
+    window.setTimeout(() => setCopied((current) => (current === key ? null : current)), 1600);
   }
 
   async function confirmOption(proposalId: string) {
-    setLoadingProposalId(proposalId);
+    setIsConfirming(true);
+    setError(null);
     try {
       await finalizeRequest(requestId, proposalId);
       const next = await getOrganizerRequest(requestId);
       setRequest(next);
+      setShortlistId(null);
     } catch (confirmError) {
-      setError(confirmError instanceof Error ? confirmError.message : 'Unable to confirm option.');
+      setError(
+        confirmError instanceof Error ? confirmError.message : 'Could not confirm that time.',
+      );
     } finally {
-      setLoadingProposalId(null);
+      setIsConfirming(false);
     }
   }
 
@@ -139,7 +167,7 @@ export default function RequestDetailPage() {
       setRequest(next);
       setPingMessage('Reminder settings saved.');
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Unable to save reminder settings.');
+      setError(saveError instanceof Error ? saveError.message : 'Could not save those settings.');
     } finally {
       setIsSavingReminders(false);
     }
@@ -153,17 +181,22 @@ export default function RequestDetailPage() {
       const result = await pingNonResponders(requestId);
       const parts: string[] = [];
       if (result.sent_count > 0) {
-        parts.push(`Queued ${result.sent_count} reminder${result.sent_count === 1 ? '' : 's'}`);
+        parts.push(`Nudged ${result.sent_count} ${result.sent_count === 1 ? 'person' : 'people'}`);
       }
       if (result.skipped_count > 0) {
-        parts.push(`skipped ${result.skipped_count} (cap or duplicate)`);
+        parts.push(
+          `${result.skipped_count} skipped — they have already had the maximum number of reminders`,
+        );
       }
-      parts.push(`${result.outstanding_count} still outstanding`);
-      setPingMessage(parts.join(' - '));
+      if (result.sent_count === 0 && result.skipped_count === 0) {
+        parts.push('Nobody to nudge');
+      }
+      parts.push(`${result.outstanding_count} still to answer`);
+      setPingMessage(parts.join(' · '));
       const next = await getOrganizerRequest(requestId);
       setRequest(next);
     } catch (pingError) {
-      setError(pingError instanceof Error ? pingError.message : 'Unable to ping non-responders.');
+      setError(pingError instanceof Error ? pingError.message : 'Could not send those nudges.');
     } finally {
       setIsPinging(false);
     }
@@ -177,13 +210,17 @@ export default function RequestDetailPage() {
     setPolicyDraft((current) => ({ ...current, [field]: Math.floor(next) }));
   }
 
-  if (error) {
+  if (error && !request) {
     return (
-      <main className="shell shell-narrow">
-        <div className="page-head">
-          <p className="eyebrow">Organizer view</p>
-          <h1>Unable to load request</h1>
-          <p className="error-text">{error}</p>
+      <main className="wrap-narrow page">
+        <div className="head">
+          <h1 className="title-page">Can&rsquo;t open this request</h1>
+          <p className="note" data-tone="bad">
+            {error}
+          </p>
+          <p>
+            <Link href="/create">Start a new one</Link>
+          </p>
         </div>
       </main>
     );
@@ -191,318 +228,96 @@ export default function RequestDetailPage() {
 
   if (!request) {
     return (
-      <main className="shell shell-narrow">
-        <div className="page-head">
-          <p className="eyebrow">Organizer view</p>
-          <h1>Loading request...</h1>
+      <main className="wrap-narrow page" aria-busy="true">
+        <div className="head">
+          <div className="skel" style={{ height: '2.5rem', width: '60%' }} />
+          <div className="skel" style={{ height: '1rem', width: '35%' }} />
         </div>
+        <div className="skel" style={{ height: '9rem', borderRadius: '16px' }} />
+        <div className="skel" style={{ height: '16rem', borderRadius: '16px' }} />
+        <span className="sr-only">Loading request</span>
       </main>
     );
   }
 
   const shareUrl = request.share?.url ?? null;
-  const confirmedOption = request.confirmed_event
-    ? request.proposals.find((proposal) => proposal.id === request.confirmed_event?.proposal_id) ?? null
+  const confirmed = request.confirmed_event;
+  const confirmedOption = confirmed
+    ? request.proposals.find((proposal) => proposal.id === confirmed.proposal_id) ?? null
+    : null;
+  const { responded_count: responded, participant_count: total, outstanding_count: outstanding } =
+    request.progress;
+  const percent = total > 0 ? Math.round((responded / total) * 100) : 0;
+  const deadlineWhen = relativeTime(request.reminders.response_deadline);
+
+  const eventType = request.event_type
+    ? request.event_type.charAt(0).toUpperCase() + request.event_type.slice(1)
+    : null;
+  const metaBits = [
+    eventType,
+    formatDuration(request.duration_min),
+    zoneLabel(request.timezone),
+    request.location,
+  ].filter(Boolean);
+  const shortlisted = shortlistId
+    ? request.proposals.find((proposal) => proposal.id === shortlistId) ?? null
+    : null;
+  const shortlistShape = shortlisted
+    ? shapeSlot(shortlisted.start_at, shortlisted.end_at, request.timezone)
     : null;
 
   return (
-    <main className="shell shell-narrow">
-      <div className="page-head">
-        <p className="eyebrow">Organizer view</p>
-        <h1>{request.title}</h1>
-        <p className="lede">
-          {request.duration_min} min - {request.timezone}
-          {request.event_type ? ` - ${request.event_type}` : ''}
-        </p>
-        {request.location || request.video_link ? (
-          <p className="helper-copy">
-            {request.location ? <span>{request.location}</span> : null}
-            {request.location && request.video_link ? <span> - </span> : null}
-            {request.video_link ? (
-              <a href={request.video_link} rel="noreferrer" target="_blank">
-                {request.video_link}
-              </a>
-            ) : null}
+    <main className="wrap-narrow page">
+      <div className="head reveal">
+        <div className="row-between">
+          <span className="label">{confirmed ? 'Booked' : 'Collecting answers'}</span>
+          <span className="pill" data-tone={confirmed ? 'done' : outstanding > 0 ? 'waiting' : 'live'}>
+            {confirmed ? 'Confirmed' : outstanding > 0 ? `${outstanding} to answer` : 'All in'}
+          </span>
+        </div>
+        <h1 className="title-page">{request.title}</h1>
+        <p className="muted">{metaBits.join(' · ')}</p>
+        {request.video_link ? (
+          <p className="muted">
+            <a href={request.video_link} rel="noreferrer" target="_blank">
+              {request.video_link}
+            </a>
           </p>
         ) : null}
       </div>
 
-      <section className="grid-two">
-        <article className="panel">
-          <p className="section-label">Participants</p>
-          <ul className="stack-form" style={{ gap: '0.5rem' }}>
-            {request.participants.map((participant) => (
-              <li key={participant.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                <strong>
-                  {participant.display_name ?? participant.email ?? participant.phone ?? 'Guest'}
-                  {participant.status === 'responded' ? ' ✓' : ''}
-                </strong>
-                {participant.invite_url ? (
-                  <code style={{ fontSize: '0.75rem', wordBreak: 'break-all' }}>
-                    {participant.invite_url}
-                  </code>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-          <p className="helper-copy">
-            {request.progress.responded_count}/{request.progress.participant_count} responded -{' '}
-            {request.progress.outstanding_count} outstanding
-          </p>
-          <p className="helper-copy">
-            Each invitee has a private link above. Reminders send each person their own link.
-          </p>
-          {request.notes ? <p className="helper-copy">{request.notes}</p> : null}
-        </article>
+      {error ? (
+        <p className="note" data-tone="bad" role="alert">
+          {error}
+        </p>
+      ) : null}
 
-        <article className="panel">
-          <p className="section-label">Share</p>
-          {shareUrl ? (
-            <>
-              <div className="share-row">
-                <code>{shareUrl}</code>
-                <button className="button button-secondary" onClick={copySharePath} type="button">
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-              <div className="button-group">
-                <Link className="button button-primary" href={shareUrl}>
-                  Preview attendee page
-                </Link>
-              </div>
-            </>
+      {confirmed ? (
+        <section className="card card-ink reveal" style={{ ['--i' as string]: 1 }}>
+          <div className="row-between">
+            <h2 className="title-card">It&rsquo;s booked</h2>
+            <span className="muted">
+              {confirmed.provider ? `Written to ${confirmed.provider}` : 'No calendar connected'}
+            </span>
+          </div>
+          {confirmedOption ? (
+            <Slot
+              startIso={confirmedOption.start_at}
+              endIso={confirmedOption.end_at}
+              timezone={request.timezone}
+              state="won"
+            />
           ) : (
-            <p className="helper-copy">No share link available yet.</p>
+            <p>{formatMoment(confirmed.start_at, request.timezone)}</p>
           )}
-        </article>
-      </section>
-
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <p className="section-label">Reminders</p>
-            <h2>Follow-up state</h2>
-          </div>
-          <button
-            className="button button-secondary"
-            disabled={isPinging || request.outstanding_participants.length === 0}
-            onClick={pingOutstanding}
-            type="button"
-          >
-            {isPinging ? 'Queueing...' : 'Ping non-responders'}
-          </button>
-        </div>
-        <div className="flat-list">
-          <div className="stat-row">
-            <span>Auto reminders</span>
-            <strong>{request.reminders.enabled ? 'On' : 'Off'}</strong>
-          </div>
-          <div className="stat-row">
-            <span>Response deadline</span>
-            <strong>{formatDateTime(request.reminders.response_deadline, request.timezone)}</strong>
-          </div>
-          <div className="stat-row">
-            <span>Last reminder</span>
-            <strong>{formatDateTime(request.reminders.last_reminded_at, request.timezone)}</strong>
-          </div>
-          <div className="stat-row">
-            <span>Total queued reminders</span>
-            <strong>{request.reminders.sent_count}</strong>
-          </div>
-        </div>
-        <div className="field-grid">
-          <div className="field field-checkbox">
-            <span>Reminder policy</span>
-            <label className="checkbox-row">
-              <input
-                checked={remindersEnabledDraft}
-                onChange={(event) => setRemindersEnabledDraft(event.target.checked)}
-                type="checkbox"
-              />
-              <span>Enable reminders for outstanding participants</span>
-            </label>
-          </div>
-          <label className="field">
-            <span>Response deadline</span>
-            <input
-              type="datetime-local"
-              value={deadlineDraft}
-              onChange={(event) => setDeadlineDraft(event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>First reminder after (hours since send)</span>
-            <input
-              type="number"
-              min={1}
-              max={720}
-              value={policyDraft.initial_hours}
-              onChange={(event) => updatePolicyField('initial_hours', event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>Follow-up cadence (hours)</span>
-            <input
-              type="number"
-              min={1}
-              max={720}
-              value={policyDraft.followup_hours}
-              onChange={(event) => updatePolicyField('followup_hours', event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>Max reminders per participant</span>
-            <input
-              type="number"
-              min={1}
-              max={10}
-              value={policyDraft.max_per_participant}
-              onChange={(event) => updatePolicyField('max_per_participant', event.target.value)}
-            />
-          </label>
-        </div>
-        <div className="button-group">
-          <button
-            className="button button-secondary"
-            disabled={isSavingReminders}
-            onClick={saveReminderState}
-            type="button"
-          >
-            {isSavingReminders ? 'Saving...' : 'Save reminder settings'}
-          </button>
-        </div>
-        {request.outstanding_participants.length > 0 ? (
-          <p className="helper-copy">
-            Waiting on{' '}
-            {request.outstanding_participants
-              .map((participant) => participant.display_name ?? participant.email ?? participant.phone ?? 'Guest')
-              .join(', ')}
-          </p>
-        ) : (
-          <p className="helper-copy">Everyone has responded.</p>
-        )}
-        {pingMessage ? <p className="success-text">{pingMessage}</p> : null}
-        {request.reminders.history.length > 0 ? (
-          <div className="reminder-history">
-            <p className="section-label">Reminder history</p>
-            <ul className="reminder-history-list">
-              {request.reminders.history.map((entry) => {
-                const participant = request.participants.find(
-                  (candidate) => candidate.id === entry.participant_id,
-                );
-                const who =
-                  participant?.display_name ??
-                  participant?.email ??
-                  participant?.phone ??
-                  entry.target;
-                return (
-                  <li key={entry.id} className="reminder-history-item">
-                    <span className="reminder-history-time">
-                      {formatDateTime(entry.created_at, request.timezone)}
-                    </span>
-                    <span className="reminder-history-meta">
-                      <strong>{who}</strong>
-                      <span> - {entry.channel}</span>
-                      <span> - #{entry.sequence}</span>
-                      <span> - {describeReminderReason(entry.reason)}</span>
-                      <span> - {describeReminderStatus(entry.status)}</span>
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <p className="section-label">Manual poll</p>
-            <h2>Proposed times</h2>
-          </div>
-          <span className={`status-pill status-${request.status}`}>{request.status}</span>
-        </div>
-        <div className="option-list">
-          {request.proposals.map((proposal, index) => {
-            const tally = request.tallies[proposal.id] ?? {
-              picked: 0,
-              maybe: 0,
-              declined: 0,
-            };
-
-            return (
-              <article className="option-card" key={proposal.id}>
-                <div className="option-copy">
-                  <strong>Option {index + 1}</strong>
-                  <p>{formatRange(proposal.start_at, proposal.end_at, request.timezone)}</p>
-                  <p className="helper-copy">
-                    {tally.picked} picked - {tally.maybe} maybe
-                  </p>
-                </div>
-                <button
-                  className="button button-secondary"
-                  disabled={loadingProposalId === proposal.id}
-                  onClick={() => confirmOption(proposal.id)}
-                  type="button"
-                >
-                  {loadingProposalId === proposal.id ? 'Confirming...' : 'Confirm winner'}
-                </button>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      {request.confirmed_event ? (
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <p className="section-label">Confirmation</p>
-              <h2>Booked artifact</h2>
-            </div>
-            <span className="status-pill status-confirmed">confirmed</span>
-          </div>
-          <div className="flat-list">
-            <div className="stat-row">
-              <span>Winning option</span>
-              <strong>
-                {confirmedOption
-                  ? formatRange(confirmedOption.start_at, confirmedOption.end_at, request.timezone)
-                  : formatDateTime(request.confirmed_event.start_at, request.timezone)}
-              </strong>
-            </div>
-            <div className="stat-row">
-              <span>Calendar write-back</span>
-              <strong>
-                {request.confirmed_event.provider
-                  ? `Sent to ${request.confirmed_event.provider}`
-                  : 'Not connected'}
-              </strong>
-            </div>
-            <div className="stat-row">
-              <span>Provider event id</span>
-              <strong>{request.confirmed_event.provider_event_id ?? 'Unavailable'}</strong>
-            </div>
-          </div>
-          <p className="helper-copy">
-            The request is confirmed. Attendees with email on file were sent the ICS automatically
-            (file outbox in local mode). Re-finalizing the same event won&rsquo;t double-send — the
-            invite job dedupes per scheduled event + participant.
-          </p>
-          <div className="button-group">
-            {request.confirmed_event.artifact_url ? (
-              <a
-                className="button button-primary"
-                href={request.confirmed_event.artifact_url}
-                rel="noreferrer"
-                target="_blank"
-              >
-                Download ICS
+          <div className="row">
+            {confirmed.artifact_url ? (
+              <a className="btn btn-quiet" href={confirmed.artifact_url} rel="noreferrer" target="_blank">
+                Download the invite
               </a>
             ) : null}
             <a
-              className="button button-secondary"
+              className="btn btn-quiet"
               href={`/events/${request.id}/respond`}
               rel="noreferrer"
               target="_blank"
@@ -510,24 +325,303 @@ export default function RequestDetailPage() {
               Open attendee view
             </a>
           </div>
-          {request.participants.length > 0 ? (
-            <ul className="confirmed-recipients">
-              {request.participants.map((participant) => (
-                <li key={participant.id}>
-                  <strong>
-                    {participant.display_name ?? participant.email ?? participant.phone ?? 'Guest'}
-                  </strong>
-                  <span className="helper-copy">
-                    {participant.email
-                      ? `Invite emailed to ${participant.email}`
-                      : 'No email on file — share the attendee link manually'}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          <p className="muted">
+            Everyone with an email on file was sent the invite. Confirming again updates the same
+            calendar event instead of sending a duplicate.
+          </p>
+        </section>
+      ) : shareUrl ? (
+        <section className="card reveal" style={{ ['--i' as string]: 1 }}>
+          <h2 className="title-card">Send this link</h2>
+          <div className="copyfield">
+            <code>{shareUrl}</code>
+            <button className="btn" onClick={() => copy(shareUrl, 'share')} type="button">
+              {copied === 'share' ? 'Copied' : 'Copy link'}
+            </button>
+          </div>
+          <p className="field-hint">
+            Paste it in the group chat. Anyone who opens it can answer without an account — and each
+            person you added also has their own link below.
+          </p>
+          <div className="row">
+            <Link className="btn btn-text btn-small" href={`/events/${request.id}/respond`}>
+              See what they see
+            </Link>
+          </div>
         </section>
       ) : null}
+
+      <section className="band reveal" style={{ ['--i' as string]: 2 }}>
+        <div className="band-head">
+          <h2 className="title-card">{confirmed ? 'How they voted' : 'The times'}</h2>
+          {!confirmed ? (
+            <span className="muted num">
+              {responded} of {total} answered
+            </span>
+          ) : null}
+        </div>
+
+        {request.proposals.length === 0 ? (
+          <p className="note">
+            This request has no times on it yet. Nobody can answer until it does.
+          </p>
+        ) : null}
+
+        <ul className="stack-tight">
+          {request.proposals.map((proposal, index) => {
+            const tally = request.tallies[proposal.id] ?? { picked: 0, maybe: 0, declined: 0 };
+            const state: SlotState = confirmed
+              ? proposal.id === confirmed.proposal_id
+                ? 'won'
+                : 'lost'
+              : 'open';
+
+            const tallyMarks = (
+              <Tally
+                picked={tally.picked}
+                maybe={tally.maybe}
+                declined={tally.declined}
+                total={total}
+              />
+            );
+
+            return (
+              <li key={proposal.id}>
+                {confirmed ? (
+                  <Slot
+                    startIso={proposal.start_at}
+                    endIso={proposal.end_at}
+                    timezone={request.timezone}
+                    index={index + 1}
+                    state={state}
+                  >
+                    {tallyMarks}
+                  </Slot>
+                ) : (
+                  <SlotChoice
+                    startIso={proposal.start_at}
+                    endIso={proposal.end_at}
+                    timezone={request.timezone}
+                    index={index + 1}
+                    selected={shortlistId === proposal.id}
+                    onSelect={() =>
+                      setShortlistId((current) => (current === proposal.id ? null : proposal.id))
+                    }
+                  >
+                    {tallyMarks}
+                  </SlotChoice>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+
+        {!confirmed && request.proposals.length > 0 ? (
+          shortlistShape ? (
+            <div className="card">
+              <p className="muted">
+                Booking {shortlistShape.full} sends everyone the invite and writes it to your
+                calendar.
+              </p>
+              <div className="row">
+                <button
+                  className="btn"
+                  disabled={isConfirming}
+                  onClick={() => confirmOption(shortlistId as string)}
+                  type="button"
+                >
+                  {isConfirming
+                    ? 'Booking…'
+                    : `Confirm ${shortlistShape.weekday} ${shortlistShape.day}`}
+                </button>
+                <button
+                  className="btn btn-text"
+                  onClick={() => setShortlistId(null)}
+                  type="button"
+                >
+                  Keep waiting
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="field-hint">Tap the time you want, then confirm it.</p>
+          )
+        ) : null}
+      </section>
+
+      <section className="card reveal" style={{ ['--i' as string]: 3 }}>
+        <div className="row-between">
+          <h2 className="title-card">
+            Who&rsquo;s in{' '}
+            <span className="muted num">
+              — {responded} of {total} answered
+            </span>
+          </h2>
+          {outstanding > 0 && !confirmed ? (
+            <button
+              className="btn btn-quiet btn-small"
+              disabled={isPinging}
+              onClick={pingOutstanding}
+              type="button"
+            >
+              {isPinging ? 'Sending…' : `Nudge the ${outstanding} still out`}
+            </button>
+          ) : null}
+        </div>
+
+        {total > 0 ? (
+          <div className="meter" role="img" aria-label={`${responded} of ${total} answered`}>
+            <span className="meter-fill" style={{ width: `${percent}%` }} />
+          </div>
+        ) : null}
+
+        {request.participants.length === 0 ? (
+          <p className="note">Nobody has been invited yet.</p>
+        ) : (
+          <ul className="people">
+            {request.participants.map((participant) => {
+              const answered = participant.status === 'responded';
+              return (
+                <li className="person" key={participant.id}>
+                  <span className="dot" data-tone={answered ? 'in' : 'waiting'} />
+                  <span className="person-name">
+                    <strong>{personName(participant)}</strong>
+                    <span>
+                      {answered
+                        ? `Answered ${relativeTime(participant.responded_at) ?? ''}`.trim()
+                        : participant.email ?? participant.phone ?? 'No contact on file'}
+                    </span>
+                  </span>
+                  {participant.invite_url ? (
+                    <button
+                      className="btn btn-quiet btn-small"
+                      onClick={() => copy(participant.invite_url as string, participant.id)}
+                      type="button"
+                    >
+                      {copied === participant.id ? 'Copied' : 'Copy their link'}
+                    </button>
+                  ) : (
+                    <span className="muted">No link</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {pingMessage ? (
+          <p className="note" data-tone="good" role="status">
+            {pingMessage}
+          </p>
+        ) : null}
+
+        {request.notes ? <p className="field-hint">Your note to them: {request.notes}</p> : null}
+      </section>
+
+      <details className="fold reveal" style={{ ['--i' as string]: 4 }}>
+        <summary>
+          Reminders —{' '}
+          {request.reminders.enabled
+            ? `on, ${request.reminders.sent_count} sent so far`
+            : 'off'}
+          {deadlineWhen && !confirmed ? `, answers due ${deadlineWhen}` : ''}
+        </summary>
+        <div className="fold-body">
+          <label className="check">
+            <input
+              checked={remindersEnabledDraft}
+              onChange={(event) => setRemindersEnabledDraft(event.target.checked)}
+              type="checkbox"
+            />
+            <span>Nudge people who haven&rsquo;t answered</span>
+          </label>
+
+          <div className="pair">
+            <label className="field">
+              <span className="field-label">Answers due by</span>
+              <input
+                className="input"
+                type="datetime-local"
+                value={deadlineDraft}
+                onChange={(event) => setDeadlineDraft(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">First nudge after (hours)</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={720}
+                value={policyDraft.initial_hours}
+                onChange={(event) => updatePolicyField('initial_hours', event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Then every (hours)</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={720}
+                value={policyDraft.followup_hours}
+                onChange={(event) => updatePolicyField('followup_hours', event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Never more than (per person)</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={10}
+                value={policyDraft.max_per_participant}
+                onChange={(event) => updatePolicyField('max_per_participant', event.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="row">
+            <button
+              className="btn btn-quiet btn-small"
+              disabled={isSavingReminders}
+              onClick={saveReminderState}
+              type="button"
+            >
+              {isSavingReminders ? 'Saving…' : 'Save reminder settings'}
+            </button>
+            <span className="field-hint">
+              Last nudge: {formatMoment(request.reminders.last_reminded_at, request.timezone)}
+            </span>
+          </div>
+
+          {request.reminders.history.length > 0 ? (
+            <ul className="people">
+              {request.reminders.history.map((entry) => {
+                const participant = request.participants.find(
+                  (candidate) => candidate.id === entry.participant_id,
+                );
+                return (
+                  <li className="person" key={entry.id}>
+                    <span className="dot" data-tone="out" />
+                    <span className="person-name">
+                      <strong>{participant ? personName(participant) : entry.target}</strong>
+                      <span>
+                        {entry.channel} · nudge #{entry.sequence} · {reminderReason(entry.reason)}
+                      </span>
+                    </span>
+                    <span className="muted num">
+                      {formatMoment(entry.created_at, request.timezone)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="field-hint">No reminders have gone out yet.</p>
+          )}
+        </div>
+      </details>
     </main>
   );
 }

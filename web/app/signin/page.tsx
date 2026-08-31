@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -25,19 +26,21 @@ export default function SignInPage() {
       setStatus('sent');
     } catch (err) {
       setStatus('error');
-      setError(err instanceof Error ? err.message : 'Could not send sign-in link.');
+      setError(err instanceof Error ? err.message : 'That link didn’t send. Try again.');
     }
   }
 
   if (!authEnabled) {
     return (
-      <main className="shell shell-narrow">
-        <div className="page-head">
-          <p className="eyebrow">Organizer sign in</p>
-          <h1>Auth is not configured</h1>
+      <main className="wrap-narrow page">
+        <div className="head reveal">
+          <h1 className="title-page">Auth is not configured</h1>
+          <p className="lede">
+            This deployment runs without Supabase, so organizer pages are open and there is nothing
+            to sign in to.
+          </p>
           <p>
-            This deployment is running in dev mode without Supabase. Organizer
-            endpoints use the local dev-auth fallback — no sign-in required.
+            <Link href="/create">Go make a request</Link>
           </p>
         </div>
       </main>
@@ -45,32 +48,48 @@ export default function SignInPage() {
   }
 
   return (
-    <main className="shell shell-narrow">
-      <div className="page-head">
-        <p className="eyebrow">Organizer sign in</p>
-        <h1>Sign in to SYZY</h1>
-        <p>We&apos;ll email you a magic link — no password needed.</p>
+    <main className="wrap-narrow page">
+      <div className="head reveal">
+        <h1 className="title-page">Sign in</h1>
+        <p className="lede">
+          Organizers sign in with a link we email you. No password to remember.
+        </p>
       </div>
 
       {status === 'sent' ? (
-        <p className="success-text">
-          Check your inbox at <strong>{email}</strong> for a sign-in link.
-        </p>
+        <section className="card reveal" style={{ ['--i' as string]: 1 }}>
+          <h2 className="title-card">Check your inbox</h2>
+          <p className="muted">
+            We sent a sign-in link to <strong>{email}</strong>. Open it on this device.
+          </p>
+          <div className="row">
+            <button className="btn btn-text btn-small" type="button" onClick={() => setStatus('idle')}>
+              Use a different email
+            </button>
+          </div>
+        </section>
       ) : (
-        <form onSubmit={onSubmit} className="field">
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-          />
-          <button type="submit" className="button" disabled={status === 'sending'}>
-            {status === 'sending' ? 'Sending…' : 'Send magic link'}
+        <form className="card reveal" style={{ ['--i' as string]: 1 }} onSubmit={onSubmit}>
+          <label className="field">
+            <span className="field-label">Email</span>
+            <input
+              className="input"
+              id="email"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+            />
+          </label>
+          <button type="submit" className="btn btn-wide" disabled={status === 'sending'}>
+            {status === 'sending' ? 'Sending…' : 'Email me a sign-in link'}
           </button>
-          {error ? <p className="error-text">{error}</p> : null}
+          {error ? (
+            <p className="note" data-tone="bad" role="alert">
+              {error}
+            </p>
+          ) : null}
         </form>
       )}
     </main>

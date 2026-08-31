@@ -23,7 +23,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `npm run dev -- --port ${PORT}`,
+    // `npm run dev -- --port N` passes N as a positional arg to `next dev`,
+    // which reads it as a project directory. Call next directly.
+    command: `npx next dev --port ${PORT}`,
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

@@ -16,28 +16,26 @@ import {
   type AvailabilityWeeklyHours,
   type CalendarConnectionPayload,
 } from '../../../lib/api';
-import { formatDateTime } from '../../../lib/types';
+import { browserTimezone, formatMoment } from '../../../lib/time';
 
 const WEEKDAYS: { id: AvailabilityWeekday; label: string }[] = [
-  { id: 'mon', label: 'Mon' },
-  { id: 'tue', label: 'Tue' },
-  { id: 'wed', label: 'Wed' },
-  { id: 'thu', label: 'Thu' },
-  { id: 'fri', label: 'Fri' },
-  { id: 'sat', label: 'Sat' },
-  { id: 'sun', label: 'Sun' },
+  { id: 'mon', label: 'Monday' },
+  { id: 'tue', label: 'Tuesday' },
+  { id: 'wed', label: 'Wednesday' },
+  { id: 'thu', label: 'Thursday' },
+  { id: 'fri', label: 'Friday' },
+  { id: 'sat', label: 'Saturday' },
+  { id: 'sun', label: 'Sunday' },
 ];
 
+const BLOCK_LABEL: Record<AvailabilityBlock['type'], string> = {
+  private: 'Private',
+  busy: 'Busy',
+  ooo: 'Out of office',
+};
+
 function emptyHours(): AvailabilityWeeklyHours {
-  return {
-    mon: [],
-    tue: [],
-    wed: [],
-    thu: [],
-    fri: [],
-    sat: [],
-    sun: [],
-  };
+  return { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] };
 }
 
 function defaultHours(): AvailabilityWeeklyHours {
@@ -54,14 +52,6 @@ function defaultHours(): AvailabilityWeeklyHours {
 
 function isoFromLocal(value: string) {
   return value ? new Date(value).toISOString() : '';
-}
-
-function browserTimezone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York';
-  } catch {
-    return 'America/New_York';
-  }
 }
 
 export default function AvailabilitySettingsPage() {
@@ -110,7 +100,9 @@ export default function AvailabilitySettingsPage() {
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : 'Unable to load availability.');
+          setError(
+            loadError instanceof Error ? loadError.message : 'Could not load your availability.',
+          );
         }
       } finally {
         if (!cancelled) {
@@ -140,9 +132,7 @@ export default function AvailabilitySettingsPage() {
       window.location.href = authorize_url;
     } catch (connectError) {
       setError(
-        connectError instanceof Error
-          ? connectError.message
-          : 'Unable to start Google connect flow.',
+        connectError instanceof Error ? connectError.message : 'Could not reach Google.',
       );
       setIsConnecting(false);
     }
@@ -158,9 +148,7 @@ export default function AvailabilitySettingsPage() {
       setConnectionMessage('Google Calendar disconnected.');
     } catch (disconnectError) {
       setError(
-        disconnectError instanceof Error
-          ? disconnectError.message
-          : 'Unable to disconnect Google.',
+        disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect Google.',
       );
     } finally {
       setIsDisconnecting(false);
@@ -208,7 +196,7 @@ export default function AvailabilitySettingsPage() {
       await upsertAvailabilityRule({ timezone, weekly_hours: hours });
       setSavedRulesAt(new Date().toISOString());
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Unable to save availability.');
+      setError(saveError instanceof Error ? saveError.message : 'Could not save your hours.');
     } finally {
       setIsSavingRules(false);
     }
@@ -216,7 +204,7 @@ export default function AvailabilitySettingsPage() {
 
   async function submitBlock() {
     if (!blockStart || !blockEnd) {
-      setError('Pick a start and end time for the block.');
+      setError('A block needs both a start and an end.');
       return;
     }
     setError(null);
@@ -231,7 +219,7 @@ export default function AvailabilitySettingsPage() {
       setBlockStart('');
       setBlockEnd('');
     } catch (blockError) {
-      setError(blockError instanceof Error ? blockError.message : 'Unable to create block.');
+      setError(blockError instanceof Error ? blockError.message : 'Could not add that block.');
     } finally {
       setIsCreatingBlock(false);
     }
@@ -243,127 +231,129 @@ export default function AvailabilitySettingsPage() {
       await deleteAvailabilityBlock(blockId);
       setBlocks((current) => current.filter((block) => block.id !== blockId));
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete block.');
+      setError(deleteError instanceof Error ? deleteError.message : 'Could not remove that block.');
     }
   }
 
   if (loading) {
     return (
-      <main className="shell shell-narrow">
-        <div className="page-head">
-          <p className="eyebrow">Settings</p>
-          <h1>Loading availability…</h1>
+      <main className="wrap-narrow page" aria-busy="true">
+        <div className="head">
+          <div className="skel" style={{ height: '2.5rem', width: '50%' }} />
+          <div className="skel" style={{ height: '1rem', width: '70%' }} />
         </div>
+        <div className="skel" style={{ height: '8rem', borderRadius: '16px' }} />
+        <div className="skel" style={{ height: '20rem', borderRadius: '16px' }} />
+        <span className="sr-only">Loading availability</span>
       </main>
     );
   }
 
   return (
-    <main className="shell shell-narrow">
-      <div className="page-head">
-        <p className="eyebrow">Settings</p>
-        <h1>Availability</h1>
+    <main className="wrap-narrow page">
+      <div className="head reveal">
+        <h1 className="title-page">Availability</h1>
         <p className="lede">
-          Set your working hours and block off times that should never appear as suggestions.
+          This is what &ldquo;Find for me&rdquo; searches when it picks times on your behalf.
         </p>
       </div>
 
-      {error ? <p className="error-text">{error}</p> : null}
+      {error ? (
+        <p className="note" data-tone="bad" role="alert">
+          {error}
+        </p>
+      ) : null}
 
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <p className="section-label">Google Calendar</p>
-            <h2>
+      <section className="card reveal" style={{ ['--i' as string]: 1 }}>
+        <div className="row-between">
+          <div className="stack-tight">
+            <span className="label">Google Calendar</span>
+            <h2 className="title-card">
               {googleConnection
-                ? `Connected to ${googleConnection.provider_email ?? googleConnection.provider_account_id}`
-                : 'Connect your calendar'}
+                ? googleConnection.provider_email ?? googleConnection.provider_account_id
+                : 'Not connected'}
             </h2>
           </div>
           {googleConnection ? (
             <button
               type="button"
-              className="button button-secondary"
+              className="btn btn-quiet btn-small"
               disabled={isDisconnecting}
               onClick={unlinkGoogle}
             >
               {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
             </button>
           ) : (
-            <button
-              type="button"
-              className="button button-primary"
-              disabled={isConnecting}
-              onClick={connectGoogle}
-            >
-              {isConnecting ? 'Redirecting…' : 'Connect Google'}
+            <button type="button" className="btn" disabled={isConnecting} onClick={connectGoogle}>
+              {isConnecting ? 'Opening Google…' : 'Connect Google'}
             </button>
           )}
         </div>
-        <p className="helper-copy privacy-copy">
-          SYZY reads when you’re busy, never event titles. Connecting lets the “Find a time” flow skip
-          slots that overlap an existing meeting. Disconnecting deletes the access token immediately.
+        <p className="note" data-tone="info">
+          SYZY reads when you&rsquo;re busy, never event titles, guests, or notes. Connecting lets it
+          skip times that clash with something already on your calendar. Disconnecting deletes the
+          access token straight away.
         </p>
-        {connectionMessage ? <p className="success-text">{connectionMessage}</p> : null}
+        {connectionMessage ? (
+          <p className="note" data-tone="good" role="status">
+            {connectionMessage}
+          </p>
+        ) : null}
       </section>
 
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <p className="section-label">Weekly hours</p>
-            <h2>When you’re generally free</h2>
-          </div>
+      <section className="card reveal" style={{ ['--i' as string]: 2 }}>
+        <div className="row-between">
+          <h2 className="title-card">Weekly hours</h2>
+          <span className="muted">Days with no window are treated as unavailable</span>
         </div>
+
         <label className="field">
-          <span>Timezone</span>
+          <span className="field-label">Timezone</span>
           <input
+            className="input"
             type="text"
             value={timezone}
             onChange={(event) => setTimezone(event.target.value)}
             placeholder="America/New_York"
           />
         </label>
-        <div className="availability-grid">
+
+        <ul className="daylist">
           {WEEKDAYS.map(({ id, label }) => (
-            <div key={id} className="availability-day">
-              <div className="availability-day-head">
+            <li key={id} className="dayrow">
+              <div className="dayrow-head">
                 <strong>{label}</strong>
-                <button
-                  className="button button-ghost"
-                  type="button"
-                  onClick={() => addWindow(id)}
-                >
-                  + Add window
+                <button className="btn btn-text btn-small" type="button" onClick={() => addWindow(id)}>
+                  Add hours
                 </button>
               </div>
               {hours[id].length === 0 ? (
-                <p className="helper-copy">Unavailable</p>
+                <p className="field-hint">Unavailable</p>
               ) : (
-                <ul className="availability-window-list">
+                <ul className="stack-tight">
                   {hours[id].map((window, index) => (
-                    <li key={`${id}-${index}`} className="availability-window">
+                    <li key={`${id}-${index}`} className="windowrow">
                       <label className="field">
-                        <span>Start</span>
+                        <span className="sr-only">{label} start</span>
                         <input
+                          className="input"
                           type="time"
                           value={window.start}
-                          onChange={(event) =>
-                            updateWindow(id, index, { start: event.target.value })
-                          }
+                          onChange={(event) => updateWindow(id, index, { start: event.target.value })}
                         />
                       </label>
+                      <span className="field-hint">to</span>
                       <label className="field">
-                        <span>End</span>
+                        <span className="sr-only">{label} end</span>
                         <input
+                          className="input"
                           type="time"
                           value={window.end}
-                          onChange={(event) =>
-                            updateWindow(id, index, { end: event.target.value })
-                          }
+                          onChange={(event) => updateWindow(id, index, { end: event.target.value })}
                         />
                       </label>
                       <button
-                        className="button button-ghost"
+                        className="btn btn-danger-text"
                         type="button"
                         onClick={() => removeWindow(id, index)}
                       >
@@ -373,55 +363,52 @@ export default function AvailabilitySettingsPage() {
                   ))}
                 </ul>
               )}
-            </div>
+            </li>
           ))}
-        </div>
-        <div className="button-group">
-          <button
-            className="button button-primary"
-            type="button"
-            disabled={isSavingRules}
-            onClick={saveRules}
-          >
+        </ul>
+
+        <div className="row">
+          <button className="btn" type="button" disabled={isSavingRules} onClick={saveRules}>
             {isSavingRules ? 'Saving…' : 'Save weekly hours'}
           </button>
+          {savedRulesAt ? (
+            <span className="field-hint" role="status">
+              Saved {formatMoment(savedRulesAt, timezone)}
+            </span>
+          ) : null}
         </div>
-        {savedRulesAt ? (
-          <p className="success-text">Saved at {formatDateTime(savedRulesAt, timezone)}</p>
-        ) : null}
       </section>
 
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <p className="section-label">One-off blocks</p>
-            <h2>Block times that should never be suggested</h2>
-          </div>
-        </div>
-        <p className="helper-copy">
-          Blocks are private. Anyone responding to your meeting requests only sees that a time isn’t
-          offered — never the title or reason.
+      <section className="card reveal" style={{ ['--i' as string]: 3 }}>
+        <h2 className="title-card">Block off time</h2>
+        <p className="field-hint">
+          Blocked time never gets offered. Anyone answering your requests just sees fewer options —
+          never the reason.
         </p>
-        <div className="field-grid">
+
+        <div className="pair">
           <label className="field">
-            <span>Start</span>
+            <span className="field-label">From</span>
             <input
+              className="input"
               type="datetime-local"
               value={blockStart}
               onChange={(event) => setBlockStart(event.target.value)}
             />
           </label>
           <label className="field">
-            <span>End</span>
+            <span className="field-label">Until</span>
             <input
+              className="input"
               type="datetime-local"
               value={blockEnd}
               onChange={(event) => setBlockEnd(event.target.value)}
             />
           </label>
           <label className="field">
-            <span>Type</span>
+            <span className="field-label">Reason (private)</span>
             <select
+              className="input"
               value={blockType}
               onChange={(event) => setBlockType(event.target.value as AvailabilityBlock['type'])}
             >
@@ -431,9 +418,10 @@ export default function AvailabilitySettingsPage() {
             </select>
           </label>
         </div>
-        <div className="button-group">
+
+        <div className="row">
           <button
-            className="button button-secondary"
+            className="btn btn-quiet btn-small"
             type="button"
             disabled={isCreatingBlock}
             onClick={submitBlock}
@@ -443,20 +431,20 @@ export default function AvailabilitySettingsPage() {
         </div>
 
         {upcomingBlocks.length === 0 ? (
-          <p className="helper-copy">No upcoming blocks.</p>
+          <p className="field-hint">Nothing blocked ahead.</p>
         ) : (
-          <ul className="availability-block-list">
+          <ul className="people">
             {upcomingBlocks.map((block) => (
-              <li key={block.id} className="availability-block-item">
-                <div>
-                  <strong>{block.type}</strong>
-                  <p className="helper-copy">
-                    {formatDateTime(block.start_at, timezone)} →{' '}
-                    {formatDateTime(block.end_at, timezone)}
-                  </p>
-                </div>
+              <li className="person" key={block.id}>
+                <span className="dot" data-tone="out" />
+                <span className="person-name">
+                  <strong>{BLOCK_LABEL[block.type]}</strong>
+                  <span>
+                    {formatMoment(block.start_at, timezone)} → {formatMoment(block.end_at, timezone)}
+                  </span>
+                </span>
                 <button
-                  className="button button-ghost"
+                  className="btn btn-danger-text"
                   type="button"
                   onClick={() => removeBlock(block.id)}
                 >

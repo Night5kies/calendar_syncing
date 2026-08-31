@@ -8,7 +8,8 @@ import {
   submitEventResponse,
   type EventRespondContext,
 } from '../../../../lib/api';
-import { detectBrowserTimezone, formatRange } from '../../../../lib/types';
+import { Slot, SlotChoice } from '../../../../components/Slot';
+import { browserTimezone, formatDuration, shapeSlot, zoneLabel } from '../../../../lib/time';
 
 type Choice = 'picked' | 'maybe' | 'declined';
 
@@ -57,6 +58,21 @@ function buildOutlookCalendarUrl(payload: {
   return `https://outlook.live.com/calendar/0/deeplink/compose?${params.toString()}`;
 }
 
+const ANSWER_COPY: Record<Choice, { heading: string; detail: string }> = {
+  picked: {
+    heading: 'You’re in',
+    detail: 'The organizer can see your pick. Change it here any time before they confirm.',
+  },
+  maybe: {
+    heading: 'Marked maybe',
+    detail: 'The organizer knows you’re a maybe. Come back to this link to firm it up.',
+  },
+  declined: {
+    heading: 'Marked can’t make it',
+    detail: 'The organizer knows you’re out. Change your mind here if that shifts.',
+  },
+};
+
 export default function EventRespondPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -70,13 +86,11 @@ export default function EventRespondPage() {
   const [comment, setComment] = useState('');
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [checkEmail, setCheckEmail] = useState<string | null>(null);
   const [submittingChoice, setSubmittingChoice] = useState<Choice | null>(null);
   const [submittedChoice, setSubmittedChoice] = useState<Choice | null>(null);
-  const [submittedProposalLabel, setSubmittedProposalLabel] = useState<string | null>(null);
 
-  const browserTimezone = useMemo(() => detectBrowserTimezone(), []);
+  const browserZone = useMemo(() => browserTimezone(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,7 +111,7 @@ export default function EventRespondPage() {
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : 'Unable to load event.');
+          setError(loadError instanceof Error ? loadError.message : 'Could not open this link.');
         }
       }
     }
@@ -113,29 +127,28 @@ export default function EventRespondPage() {
   const isTokenMode = Boolean(invitedAs);
   const isConfirmed = event?.status === 'confirmed' && confirmedEvent !== null;
   const organizerTimezone = event?.timezone ?? 'UTC';
-  const showsLocalTime = browserTimezone !== organizerTimezone;
+  const showsLocalTime = browserZone !== organizerTimezone;
 
   async function submit(choice: Choice) {
     if (!event) return;
 
     if (!isTokenMode) {
       if (!displayName.trim()) {
-        setError('Enter your name before submitting.');
+        setError('Add your name so the organizer knows who answered.');
         return;
       }
       if (!email.trim()) {
-        setError('Enter the email you were invited with — or any email if you are responding via the general link.');
+        setError('Add your email — use the one you were invited with if you have it.');
         return;
       }
     }
     if (choice === 'picked' && !selectedProposalId) {
-      setError('Choose a time option first.');
+      setError('Tap a time first, then pick it.');
       return;
     }
 
     setError(null);
     setCheckEmail(null);
-    setSuccess(null);
     setSubmittingChoice(choice);
 
     try {
@@ -154,35 +167,28 @@ export default function EventRespondPage() {
         return;
       }
 
-      const proposalLabel =
-        choice === 'declined' || !selectedProposalId
-          ? null
-          : event.proposals.find((proposal) => proposal.id === selectedProposalId);
       setSubmittedChoice(choice);
-      setSubmittedProposalLabel(
-        proposalLabel ? formatRange(proposalLabel.start_at, proposalLabel.end_at, browserTimezone) : null,
-      );
-      setSuccess(
-        choice === 'picked'
-          ? 'You are in. The organizer can now see your selected time.'
-          : choice === 'maybe'
-            ? 'Marked as maybe. You can still update your response from this link.'
-            : "Marked as unavailable. You can still update your response from this link.",
-      );
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : 'Unable to submit response.');
+      setError(submitError instanceof Error ? submitError.message : 'Could not save your answer.');
     } finally {
       setSubmittingChoice(null);
     }
   }
 
   if (error && !event) {
+    const expired = /expired/i.test(error);
     return (
-      <main className="shell shell-narrow">
-        <div className="page-head">
-          <p className="eyebrow">Attendee view</p>
-          <h1>Unable to load event</h1>
-          <p className="error-text">{error}</p>
+      <main className="wrap-narrow page">
+        <div className="head">
+          <h1 className="title-page">{expired ? 'This link has expired' : 'This link didn’t open'}</h1>
+          <p className="lede">
+            {expired
+              ? 'Ask whoever sent it for a fresh one — it only takes them a tap.'
+              : error}
+          </p>
         </div>
       </main>
     );
@@ -190,258 +196,261 @@ export default function EventRespondPage() {
 
   if (!event) {
     return (
-      <main className="shell shell-narrow">
-        <div className="page-head">
-          <p className="eyebrow">Attendee view</p>
-          <h1>Loading event...</h1>
+      <main className="wrap-narrow page" aria-busy="true">
+        <div className="head">
+          <div className="skel" style={{ height: '2.5rem', width: '70%' }} />
+          <div className="skel" style={{ height: '1rem', width: '40%' }} />
         </div>
+        <div className="skel" style={{ height: '6rem', borderRadius: '10px' }} />
+        <div className="skel" style={{ height: '6rem', borderRadius: '10px' }} />
+        <span className="sr-only">Loading</span>
       </main>
     );
   }
 
+  const metaBits = [formatDuration(event.duration_min), event.location].filter(Boolean);
+
   if (isConfirmed && confirmedEvent) {
+    const hasTimes = Boolean(confirmedEvent.start_at && confirmedEvent.end_at);
     return (
-      <main className="shell shell-narrow">
-        <div className="page-head">
-          <p className="eyebrow">Attendee view</p>
-          <h1>{event.title}</h1>
-          <p className="lede">This is confirmed. Save the time below to your calendar.</p>
+      <main className="wrap-narrow page">
+        <div className="head reveal">
+          <span className="pill" data-tone="done">
+            Confirmed
+          </span>
+          <h1 className="title-page">{event.title}</h1>
+          <p className="lede">This is confirmed. Save it to your calendar and you&rsquo;re done.</p>
         </div>
 
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <p className="section-label">Confirmed</p>
-              <h2>
-                {confirmedEvent.start_at && confirmedEvent.end_at
-                  ? formatRange(confirmedEvent.start_at, confirmedEvent.end_at, browserTimezone)
-                  : 'Time pending'}
-              </h2>
-            </div>
-            <span className="status-pill status-confirmed">confirmed</span>
-          </div>
-          {showsLocalTime ? (
-            <p className="helper-copy">
-              Shown in your local timezone ({browserTimezone}). Organizer scheduled in {organizerTimezone}.
-            </p>
+        <section className="card card-ink reveal" style={{ ['--i' as string]: 1 }}>
+          {hasTimes ? (
+            <Slot
+              startIso={confirmedEvent.start_at as string}
+              endIso={confirmedEvent.end_at as string}
+              timezone={browserZone}
+              state="won"
+              note={showsLocalTime ? `Shown in your time — ${zoneLabel(browserZone)}` : undefined}
+            />
           ) : (
-            <p className="helper-copy">Shown in {browserTimezone}.</p>
+            <p>The organizer is finalizing the time.</p>
           )}
-          <div className="flat-list">
+
+          <ul className="stack-tight">
             {confirmedEvent.location ? (
-              <div className="stat-row">
-                <span>Location</span>
-                <strong>{confirmedEvent.location}</strong>
-              </div>
+              <li className="muted">Where: {confirmedEvent.location}</li>
             ) : null}
             {confirmedEvent.video_link ? (
-              <div className="stat-row">
-                <span>Video link</span>
-                <strong>
-                  <a href={confirmedEvent.video_link} rel="noreferrer" target="_blank">
-                    {confirmedEvent.video_link}
-                  </a>
-                </strong>
-              </div>
-            ) : null}
-            {confirmedEvent.notes ? (
-              <div className="stat-row">
-                <span>Notes</span>
-                <strong>{confirmedEvent.notes}</strong>
-              </div>
-            ) : null}
-          </div>
-          <div className="button-group">
-            {confirmedEvent.start_at && confirmedEvent.end_at ? (
-              <>
-                <a
-                  className="button button-primary"
-                  href={buildGoogleCalendarUrl({
-                    title: event.title,
-                    startIso: confirmedEvent.start_at,
-                    endIso: confirmedEvent.end_at,
-                    details: confirmedEvent.notes ?? '',
-                    location: confirmedEvent.location ?? confirmedEvent.video_link ?? '',
-                  })}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Add to Google Calendar
+              <li className="muted">
+                Join:{' '}
+                <a href={confirmedEvent.video_link} rel="noreferrer" target="_blank">
+                  {confirmedEvent.video_link}
                 </a>
-                <a
-                  className="button button-secondary"
-                  href={buildOutlookCalendarUrl({
-                    title: event.title,
-                    startIso: confirmedEvent.start_at,
-                    endIso: confirmedEvent.end_at,
-                    details: confirmedEvent.notes ?? '',
-                    location: confirmedEvent.location ?? confirmedEvent.video_link ?? '',
-                  })}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Add to Outlook
-                </a>
-              </>
+              </li>
             ) : null}
-            {confirmedEvent.artifact_url ? (
+            {confirmedEvent.notes ? <li className="muted">{confirmedEvent.notes}</li> : null}
+          </ul>
+
+          {hasTimes ? (
+            <div className="row">
               <a
-                className="button button-secondary"
-                href={confirmedEvent.artifact_url}
+                className="btn btn-quiet"
+                href={buildGoogleCalendarUrl({
+                  title: event.title,
+                  startIso: confirmedEvent.start_at as string,
+                  endIso: confirmedEvent.end_at as string,
+                  details: confirmedEvent.notes ?? '',
+                  location: confirmedEvent.location ?? confirmedEvent.video_link ?? '',
+                })}
                 rel="noreferrer"
                 target="_blank"
               >
-                Apple Calendar (.ics)
+                Add to Google Calendar
               </a>
-            ) : null}
-          </div>
-          {!confirmedEvent.artifact_url ? (
-            <p className="helper-copy">
-              ICS file isn’t ready yet — the Google/Outlook buttons still work.
-            </p>
+              <a
+                className="btn btn-quiet"
+                href={buildOutlookCalendarUrl({
+                  title: event.title,
+                  startIso: confirmedEvent.start_at as string,
+                  endIso: confirmedEvent.end_at as string,
+                  details: confirmedEvent.notes ?? '',
+                  location: confirmedEvent.location ?? confirmedEvent.video_link ?? '',
+                })}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Add to Outlook
+              </a>
+              {confirmedEvent.artifact_url ? (
+                <a
+                  className="btn btn-quiet"
+                  href={confirmedEvent.artifact_url}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Apple Calendar
+                </a>
+              ) : null}
+            </div>
           ) : null}
         </section>
       </main>
     );
   }
 
+  const answer = submittedChoice ? ANSWER_COPY[submittedChoice] : null;
+  const selectedShape = selectedProposalId
+    ? (() => {
+        const found = event.proposals.find((proposal) => proposal.id === selectedProposalId);
+        return found ? shapeSlot(found.start_at, found.end_at, browserZone) : null;
+      })()
+    : null;
+
   return (
-    <main className="shell shell-narrow">
-      <div className="page-head">
-        <p className="eyebrow">Attendee view</p>
-        <h1>{event.title}</h1>
+    <main className="wrap-narrow page">
+      <div className="head reveal">
+        <h1 className="title-page">{event.title}</h1>
+        <p className="muted">{metaBits.join(' · ')}</p>
         {isTokenMode ? (
           <p className="lede">
-            Responding as <strong>{invitedAs?.display_name || invitedAs?.email || 'invited guest'}</strong>.
+            Responding as <strong>{invitedAs?.display_name || invitedAs?.email || 'you'}</strong>.
           </p>
         ) : (
-          <p className="lede">Respond from the browser. No account or app install is required.</p>
+          <p className="lede">Tap the times that work. No account, no app.</p>
         )}
       </div>
 
       {checkEmail ? (
-        <section className="panel">
-          <p className="section-label">Check your email</p>
-          <h2>We sent you a private link</h2>
-          <p className="helper-copy">{checkEmail}</p>
+        <section className="card reveal" data-tone="info">
+          <h2 className="title-card">Check your email</h2>
+          <p className="muted">{checkEmail}</p>
         </section>
       ) : null}
 
-      {submittedChoice && !checkEmail ? (
-        <section className="panel">
-          <p className="section-label">Response saved</p>
-          <h2>
-            {submittedChoice === 'picked'
-              ? 'You picked a time'
-              : submittedChoice === 'maybe'
-                ? 'You marked maybe'
-                : "You can't make it"}
-          </h2>
-          <p className="helper-copy">
-            {submittedProposalLabel ? `Submitted choice: ${submittedProposalLabel}. ` : ''}
-            {success}
-          </p>
-        </section>
-      ) : null}
-
-      <form className="stack-form" onSubmit={(formEvent) => formEvent.preventDefault()}>
-        <label className="field">
-          <span>Your name</span>
-          <input
-            value={displayName}
-            onChange={(formEvent) => setDisplayName(formEvent.target.value)}
-            readOnly={isTokenMode && Boolean(invitedAs?.display_name)}
-          />
-        </label>
-
-        <label className="field">
-          <span>Email{isTokenMode ? ' (locked)' : ''}</span>
-          <input
-            value={email}
-            onChange={(formEvent) => setEmail(formEvent.target.value)}
-            placeholder="email@example.com"
-            readOnly={isTokenMode}
-          />
-          {!isTokenMode ? (
-            <span className="helper-copy">Use the email you were invited with, if you received an invite.</span>
+      {answer && !checkEmail ? (
+        <section className="card reveal" style={{ ['--i' as string]: 1 }} role="status">
+          <div className="row-between">
+            <h2 className="title-card">{answer.heading}</h2>
+            <span className="pill" data-tone={submittedChoice === 'picked' ? 'live' : 'waiting'}>
+              Saved
+            </span>
+          </div>
+          {selectedShape && submittedChoice !== 'declined' ? (
+            <p className="muted">You picked {selectedShape.full}.</p>
           ) : null}
-        </label>
+          <p className="muted">{answer.detail}</p>
+        </section>
+      ) : null}
 
+      <form className="stack-loose" onSubmit={(formEvent) => formEvent.preventDefault()}>
         {!isTokenMode ? (
-          <label className="field">
-            <span>Phone (optional)</span>
-            <input
-              value={phone}
-              onChange={(formEvent) => setPhone(formEvent.target.value)}
-              placeholder="555-222-0101"
-            />
-          </label>
+          <section className="card reveal" style={{ ['--i' as string]: 2 }}>
+            <h2 className="title-card">Who are you?</h2>
+            <div className="pair">
+              <label className="field">
+                <span className="field-label">Your name</span>
+                <input
+                  className="input"
+                  value={displayName}
+                  onChange={(formEvent) => setDisplayName(formEvent.target.value)}
+                  placeholder="Alex"
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">Email</span>
+                <input
+                  className="input"
+                  type="email"
+                  value={email}
+                  onChange={(formEvent) => setEmail(formEvent.target.value)}
+                  placeholder="alex@example.com"
+                />
+                <span className="field-hint">
+                  Use the one you were invited with, if you got an invite.
+                </span>
+              </label>
+            </div>
+            <label className="field">
+              <span className="field-label">Phone (optional)</span>
+              <input
+                className="input"
+                value={phone}
+                onChange={(formEvent) => setPhone(formEvent.target.value)}
+                placeholder="555-222-0101"
+              />
+            </label>
+          </section>
         ) : null}
 
-        <section className="panel">
-          <p className="section-label">Choose an option</p>
-          <p className="helper-copy">
-            {showsLocalTime
-              ? `Times shown in your local timezone (${browserTimezone}). Organizer scheduled in ${organizerTimezone}.`
-              : `Times shown in ${browserTimezone}.`}
-          </p>
-          <div className="option-list">
-            {event.proposals.map((proposal, index) => (
-              <button
-                className={
-                  selectedProposalId === proposal.id ? 'option-card option-card-active' : 'option-card'
-                }
-                key={proposal.id}
-                onClick={() => setSelectedProposalId(proposal.id)}
-                type="button"
-              >
-                <div className="option-copy">
-                  <strong>Option {index + 1}</strong>
-                  <p>{formatRange(proposal.start_at, proposal.end_at, browserTimezone)}</p>
-                </div>
-              </button>
-            ))}
+        <section className="band reveal" style={{ ['--i' as string]: 3 }}>
+          <div className="band-head">
+            <h2 className="title-card">Pick what works</h2>
+            <span className="muted">
+              {showsLocalTime ? `Your time · ${zoneLabel(browserZone)}` : zoneLabel(browserZone)}
+            </span>
           </div>
+          <ul className="stack-tight">
+            {event.proposals.map((proposal, index) => (
+              <li key={proposal.id}>
+                <SlotChoice
+                  startIso={proposal.start_at}
+                  endIso={proposal.end_at}
+                  timezone={browserZone}
+                  index={index + 1}
+                  selected={selectedProposalId === proposal.id}
+                  onSelect={() => setSelectedProposalId(proposal.id)}
+                />
+              </li>
+            ))}
+          </ul>
+
+          <label className="field">
+            <span className="field-label">Add a note (optional)</span>
+            <textarea
+              className="input"
+              rows={2}
+              value={comment}
+              onChange={(formEvent) => setComment(formEvent.target.value)}
+              placeholder="After 7 works best for me"
+            />
+          </label>
         </section>
 
-        <label className="field">
-          <span>Comment (optional)</span>
-          <textarea
-            rows={3}
-            value={comment}
-            onChange={(formEvent) => setComment(formEvent.target.value)}
-            placeholder="After 7 works best for me"
-          />
-        </label>
+        {error ? (
+          <p className="note" data-tone="bad" role="alert">
+            {error}
+          </p>
+        ) : null}
 
-        <div className="button-group">
+        <div className="dock">
           <button
-            className="button button-primary"
-            disabled={submittingChoice !== null}
+            className="btn"
+            disabled={submittingChoice !== null || !selectedShape}
             onClick={() => submit('picked')}
             type="button"
           >
-            {submittingChoice === 'picked' ? 'Submitting...' : 'Pick selected time'}
+            {submittingChoice === 'picked'
+              ? 'Saving…'
+              : selectedShape
+                ? `Pick ${selectedShape.weekday} ${selectedShape.day}`
+                : 'Tap a time first'}
           </button>
           <button
-            className="button button-secondary"
+            className="btn btn-quiet"
             disabled={submittingChoice !== null}
             onClick={() => submit('maybe')}
             type="button"
           >
-            {submittingChoice === 'maybe' ? 'Submitting...' : 'Maybe'}
+            {submittingChoice === 'maybe' ? 'Saving…' : 'Maybe'}
           </button>
           <button
-            className="button button-secondary"
+            className="btn btn-quiet"
             disabled={submittingChoice !== null}
             onClick={() => submit('declined')}
             type="button"
           >
-            {submittingChoice === 'declined' ? 'Submitting...' : "Can't make it"}
+            {submittingChoice === 'declined' ? 'Saving…' : 'Can’t make it'}
           </button>
         </div>
-
-        {error ? <p className="error-text">{error}</p> : null}
       </form>
     </main>
   );

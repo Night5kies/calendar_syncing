@@ -1,10 +1,25 @@
 import type { Metadata } from 'next';
+import { Bricolage_Grotesque, Instrument_Sans } from 'next/font/google';
+
 import './globals.css';
 import { AuthProvider } from '../components/AuthProvider';
+import { TopRail } from '../components/TopRail';
+
+const display = Bricolage_Grotesque({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-display',
+});
+
+const sans = Instrument_Sans({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-sans',
+});
 
 export const metadata: Metadata = {
   title: 'SYZY',
-  description: 'Link-first social scheduling for meals, hangouts, and group plans.',
+  description: 'Send one link, get a time everyone can make. No account for guests.',
 };
 
 export default function RootLayout({
@@ -13,9 +28,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${display.variable} ${sans.variable}`}>
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <TopRail />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

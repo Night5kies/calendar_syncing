@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   addParticipant,
@@ -11,6 +11,8 @@ import {
   suggestProposals,
   type SuggestSlotPayload,
 } from '../../lib/api';
+import { rememberRequest } from '../../lib/recents';
+import { browserTimezone, formatMoment, shapeSlot } from '../../lib/time';
 import type { RequestTemplate } from '../../lib/types';
 
 type PollMode = 'manual' | 'auto';
@@ -59,25 +61,25 @@ type TemplateConfig = {
 const TEMPLATE_CONFIG: Record<RequestTemplate, TemplateConfig> = {
   meal: {
     label: 'Meal',
-    helper: 'Lunch + dinner windows, 75 min',
+    helper: 'Two dinners and a lunch',
     durationMin: 75,
     slotHours: [19, 19, 12],
   },
   coffee: {
     label: 'Coffee',
-    helper: 'Morning + afternoon, 30 min',
+    helper: 'Mornings and one afternoon',
     durationMin: 30,
     slotHours: [9, 15, 10],
   },
   study: {
     label: 'Study',
-    helper: 'Late afternoon + evening, 60 min',
+    helper: 'Late afternoons and evenings',
     durationMin: 60,
     slotHours: [17, 19, 20],
   },
   hangout: {
     label: 'Hangout',
-    helper: 'Afternoon + evening, 90 min',
+    helper: 'Afternoons and evenings',
     durationMin: 90,
     slotHours: [15, 19, 19],
   },
@@ -146,12 +148,22 @@ function parseParticipantLine(line: string): ParsedParticipant | null {
   return { displayName, phone: contact };
 }
 
+/** Local `datetime-local` value -> the rail position of that moment. */
+function trackStyle(localValue: string) {
+  if (!localValue) return null;
+  const start = new Date(localValue);
+  if (Number.isNaN(start.getTime())) return null;
+  const shape = shapeSlot(start.toISOString(), start.toISOString(), browserTimezone());
+  return { from: shape.from, weekday: shape.weekday, day: shape.day };
+}
+
 export default function CreatePage() {
   const router = useRouter();
   const [title, setTitle] = useState('Dinner next week');
   const [template, setTemplate] = useState<RequestTemplate>('meal');
   const [durationMinutes, setDurationMinutes] = useState(TEMPLATE_CONFIG.meal.durationMin);
   const [timezone, setTimezone] = useState('America/New_York');
+  const [zoneOptions, setZoneOptions] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
   const [location, setLocation] = useState('');
   const [videoLink, setVideoLink] = useState('');
@@ -178,6 +190,7 @@ export default function CreatePage() {
 
   const durationTouched = useRef(false);
   const previewDraftIdRef = useRef<string | null>(null);
+  const previewDraftSigRef = useRef<string | null>(null);
   const [slotsTouched, setSlotsTouched] = useState(false);
 
   useEffect(() => {
@@ -185,9 +198,44 @@ export default function CreatePage() {
       return;
     }
     setHasSavedSettings(window.localStorage.getItem(LAST_SETTINGS_KEY) !== null);
+    setTimezone((current) => (current === 'America/New_York' ? browserTimezone() : current));
+    try {
+      const supported = (
+        Intl as unknown as { supportedValuesOf?: (key: string) => string[] }
+      ).supportedValuesOf?.('timeZone');
+      if (supported) setZoneOptions(supported);
+    } catch {
+      // datalist is a convenience; the field still accepts any zone
+    }
   }, []);
 
   const canAddOption = options.length < 5;
+
+  const parsedParticipants = useMemo(
+    () =>
+      participants
+        .split('\n')
+        .map(parseParticipantLine)
+        .filter((entry): entry is ParsedParticipant => entry !== null),
+    [participants],
+  );
+
+  /**
+   * "Find a time" needs a saved request before it can search, so previewing
+   * creates a draft. Reuse that draft on submit only while the details it was
+   * created with still match — otherwise the request would keep a stale title.
+   */
+  const draftSignature = [
+    title,
+    durationMinutes,
+    timezone,
+    template,
+    location,
+    videoLink,
+    notes,
+    responseDeadline,
+    remindersEnabled,
+  ].join('');
 
   function chooseTemplate(next: RequestTemplate) {
     setTemplate(next);
@@ -277,7 +325,7 @@ export default function CreatePage() {
     const startMin = timeStringToMinutes(autoWindowStart);
     const endMin = timeStringToMinutes(autoWindowEnd);
     if (endMin <= startMin) {
-      throw new Error('Time-of-day window: end must be after start.');
+      throw new Error('The latest end has to come after the earliest start.');
     }
     return {
       start_date: autoStartDate,
@@ -292,31 +340,39 @@ export default function CreatePage() {
     };
   }
 
+  function newRequestPayload() {
+    return {
+      title,
+      duration_min: durationMinutes,
+      timezone,
+      event_type: template,
+      location: location.trim() || null,
+      video_link: videoLink.trim() || null,
+      notes: notes || null,
+      response_deadline: responseDeadline ? new Date(responseDeadline).toISOString() : null,
+      reminders_enabled: remindersEnabled,
+    };
+  }
+
   async function previewAutoSuggestions() {
     setError(null);
     setAutoPreview(null);
     setIsPreviewing(true);
     try {
       const constraints = autoConstraintsPayload();
-      // Preview requires an existing request id; create a throwaway draft, preview, delete.
-      // Cheaper path: re-use a single draft created at preview time and keep it for submit.
-      const created = await createRequest({
-        title,
-        duration_min: durationMinutes,
-        timezone,
-        event_type: template,
-        location: location.trim() || null,
-        video_link: videoLink.trim() || null,
-        notes: notes || null,
-        response_deadline: responseDeadline ? new Date(responseDeadline).toISOString() : null,
-        reminders_enabled: remindersEnabled,
-      });
-      const result = await suggestProposals(created.id, { ...constraints, mode: 'preview' });
+      let draftId = previewDraftIdRef.current;
+      if (!draftId || previewDraftSigRef.current !== draftSignature) {
+        const created = await createRequest(newRequestPayload());
+        draftId = created.id;
+        previewDraftIdRef.current = draftId;
+        previewDraftSigRef.current = draftSignature;
+      }
+      const result = await suggestProposals(draftId, { ...constraints, mode: 'preview' });
       setAutoPreview(result.suggestions);
-      // store the draft id so submit can finalize against the same one
-      previewDraftIdRef.current = created.id;
     } catch (previewError) {
-      setError(previewError instanceof Error ? previewError.message : 'Unable to preview suggestions.');
+      setError(
+        previewError instanceof Error ? previewError.message : 'Could not search for times.',
+      );
     } finally {
       setIsPreviewing(false);
     }
@@ -325,13 +381,8 @@ export default function CreatePage() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const parsedParticipants = participants
-      .split('\n')
-      .map(parseParticipantLine)
-      .filter((entry): entry is ParsedParticipant => entry !== null);
-
     if (parsedParticipants.length === 0) {
-      setError('Add at least one participant.');
+      setError('Add at least one person, one per line.');
       return;
     }
 
@@ -340,17 +391,17 @@ export default function CreatePage() {
         (participant) => !participant.displayName || (!participant.email && !participant.phone),
       )
     ) {
-      setError('Each participant line must include a name and either an email or phone.');
+      setError('Every line needs a name and either an email or a phone number.');
       return;
     }
 
     if (pollMode === 'manual' && (options.length < 3 || options.some((option) => !option.start))) {
-      setError('Add 3 to 5 time options for the MVP poll.');
+      setError('Put up 3 to 5 times so people have a real choice.');
       return;
     }
 
     if (pollMode === 'auto' && !autoStartDate) {
-      setError('Pick a start date for the search range.');
+      setError('Pick the first date SYZY should search from.');
       return;
     }
 
@@ -358,19 +409,12 @@ export default function CreatePage() {
     setIsSubmitting(true);
 
     try {
-      let requestId = pollMode === 'auto' ? previewDraftIdRef.current : null;
+      let requestId =
+        pollMode === 'auto' && previewDraftSigRef.current === draftSignature
+          ? previewDraftIdRef.current
+          : null;
       if (!requestId) {
-        const created = await createRequest({
-          title,
-          duration_min: durationMinutes,
-          timezone,
-          event_type: template,
-          location: location.trim() || null,
-          video_link: videoLink.trim() || null,
-          notes: notes || null,
-          response_deadline: responseDeadline ? new Date(responseDeadline).toISOString() : null,
-          reminders_enabled: remindersEnabled,
-        });
+        const created = await createRequest(newRequestPayload());
         requestId = created.id;
       }
 
@@ -400,11 +444,13 @@ export default function CreatePage() {
 
       await createShareLink(requestId);
       persistLastSettings();
+      rememberRequest({ id: requestId, title, createdAt: new Date().toISOString() });
       previewDraftIdRef.current = null;
+      previewDraftSigRef.current = null;
       router.push(`/request/${requestId}`);
     } catch (submissionError) {
       setError(
-        submissionError instanceof Error ? submissionError.message : 'Unable to create request.',
+        submissionError instanceof Error ? submissionError.message : 'Could not create the request.',
       );
     } finally {
       setIsSubmitting(false);
@@ -420,233 +466,239 @@ export default function CreatePage() {
   }
 
   return (
-    <main className="shell shell-narrow">
-      <div className="page-head">
-        <p className="eyebrow">Organizer flow</p>
-        <h1>Create a request</h1>
+    <main className="wrap-narrow page">
+      <div className="head reveal">
+        <h1 className="title-page">New request</h1>
         <p className="lede">
-          Pick a template — it sets sensible defaults you can edit. Wired to the FastAPI backend via
-          local dev auth.
+          Put a few times on the table, then send one link to the group. You can change everything
+          up until you send it.
         </p>
       </div>
 
-      <form className="stack-form" onSubmit={handleSubmit}>
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <p className="section-label">Template</p>
-              <h2>Pick a shape</h2>
-            </div>
+      <form className="stack-loose" onSubmit={handleSubmit}>
+        <section className="card reveal" style={{ ['--i' as string]: 1 }}>
+          <div className="row-between">
+            <h2 className="title-card">The plan</h2>
             {hasSavedSettings ? (
-              <button
-                className="button button-secondary"
-                onClick={applyLastSettings}
-                type="button"
-              >
+              <button className="btn btn-text btn-small" onClick={applyLastSettings} type="button">
                 Use my last settings
               </button>
             ) : null}
           </div>
-          <div className="template-chip-row">
+
+          <div className="chips-grid">
             {TEMPLATES.map((option) => {
               const config = TEMPLATE_CONFIG[option];
-              const isActive = template === option;
               return (
                 <button
-                  className={`template-chip${isActive ? ' template-chip-active' : ''}`}
+                  className="chip chip-tall"
                   key={option}
                   onClick={() => chooseTemplate(option)}
                   type="button"
-                  aria-pressed={isActive}
+                  aria-pressed={template === option}
                 >
-                  <span className="template-chip-label">{config.label}</span>
-                  <span className="template-chip-helper">{config.helper}</span>
+                  <strong>{config.label}</strong>
+                  <span>{config.helper}</span>
                 </button>
               );
             })}
           </div>
-        </section>
 
-        <label className="field">
-          <span>Title</span>
-          <input value={title} onChange={(event) => setTitle(event.target.value)} />
-        </label>
-
-        <div className="field-grid">
           <label className="field">
-            <span>Duration</span>
-            <select
-              value={durationMinutes}
-              onChange={(event) => {
-                durationTouched.current = true;
-                setDurationMinutes(Number(event.target.value));
-              }}
-            >
-              {[15, 30, 45, 60, 75, 90, 120].map((value) => (
-                <option key={value} value={value}>
-                  {value} min
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Timezone</span>
+            <span className="field-label">What are you calling it?</span>
             <input
-              value={timezone}
-              onChange={(event) => setTimezone(event.target.value)}
-              placeholder="America/New_York"
+              className="input"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Dinner next week"
             />
           </label>
-        </div>
 
-        <div className="field-grid">
-          <label className="field">
-            <span>Location (optional)</span>
-            <input
-              value={location}
-              onChange={(event) => setLocation(event.target.value)}
-              placeholder="Joe's Coffee on Main"
-            />
-          </label>
-          <label className="field">
-            <span>Video link (optional)</span>
-            <input
-              value={videoLink}
-              onChange={(event) => setVideoLink(event.target.value)}
-              placeholder="https://meet.google.com/..."
-              type="url"
-            />
-          </label>
-        </div>
-
-        <div className="field-grid">
-          <label className="field">
-            <span>Response deadline</span>
-            <input
-              type="datetime-local"
-              value={responseDeadline}
-              onChange={(event) => setResponseDeadline(event.target.value)}
-            />
-          </label>
-          <div className="field field-checkbox">
-            <span>Reminder policy</span>
-            <label className="checkbox-row">
+          <div className="pair">
+            <label className="field">
+              <span className="field-label">How long</span>
+              <select
+                className="input"
+                value={durationMinutes}
+                onChange={(event) => {
+                  durationTouched.current = true;
+                  setDurationMinutes(Number(event.target.value));
+                }}
+              >
+                {[15, 30, 45, 60, 75, 90, 120].map((value) => (
+                  <option key={value} value={value}>
+                    {value} min
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">Timezone</span>
               <input
-                checked={remindersEnabled}
-                onChange={(event) => setRemindersEnabled(event.target.checked)}
-                type="checkbox"
+                className="input"
+                list="syzy-timezones"
+                value={timezone}
+                onChange={(event) => setTimezone(event.target.value)}
+                placeholder="America/New_York"
               />
-              <span>Auto-remind non-responders</span>
+              <datalist id="syzy-timezones">
+                {zoneOptions.map((zone) => (
+                  <option key={zone} value={zone} />
+                ))}
+              </datalist>
             </label>
           </div>
-        </div>
 
-        <label className="field">
-          <span>Participants</span>
-          <textarea
-            rows={5}
-            value={participants}
-            onChange={(event) => setParticipants(event.target.value)}
-            placeholder="One per line: Name | email@example.com or Name | 555-222-0101"
-          />
-        </label>
+          <div className="pair">
+            <label className="field">
+              <span className="field-label">Where (optional)</span>
+              <input
+                className="input"
+                value={location}
+                onChange={(event) => setLocation(event.target.value)}
+                placeholder="Joe's on Main"
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Video link (optional)</span>
+              <input
+                className="input"
+                value={videoLink}
+                onChange={(event) => setVideoLink(event.target.value)}
+                placeholder="https://meet.google.com/..."
+                type="url"
+              />
+            </label>
+          </div>
 
-        <label className="field">
-          <span>Notes</span>
-          <textarea
-            rows={4}
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            placeholder="Optional context for the group"
-          />
-        </label>
+          <label className="field">
+            <span className="field-label">Anything they should know (optional)</span>
+            <textarea
+              className="input"
+              rows={3}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Booking a table for six, so I need a headcount by Friday."
+            />
+          </label>
+        </section>
 
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <p className="section-label">Poll mode</p>
-              <h2>{pollMode === 'manual' ? 'Time options' : 'Find a time'}</h2>
-            </div>
-            <div className="mode-toggle" role="group" aria-label="Poll mode">
+        <section className="card reveal" style={{ ['--i' as string]: 2 }}>
+          <div className="row-between">
+            <h2 className="title-card">{pollMode === 'manual' ? 'The times' : 'Find a time'}</h2>
+            <div className="segmented" role="group" aria-label="How to choose times">
               <button
-                className={`mode-toggle-button${pollMode === 'manual' ? ' mode-toggle-button-active' : ''}`}
                 type="button"
                 aria-pressed={pollMode === 'manual'}
                 onClick={() => setPollMode('manual')}
               >
-                Manual poll
+                I&rsquo;ll pick
               </button>
               <button
-                className={`mode-toggle-button${pollMode === 'auto' ? ' mode-toggle-button-active' : ''}`}
                 type="button"
                 aria-pressed={pollMode === 'auto'}
                 onClick={() => setPollMode('auto')}
               >
-                Find a time
+                Find for me
               </button>
             </div>
           </div>
 
           {pollMode === 'manual' ? (
             <>
-              <div className="button-group" style={{ justifyContent: 'flex-end' }}>
+              <p className="field-hint">
+                Three to five options. They lock once you send, so a change after that means
+                starting a new request.
+              </p>
+              <ul className="optlist">
+                {options.map((option, index) => {
+                  const track = trackStyle(option.start);
+                  return (
+                    <li className="optrow" key={option.id}>
+                      <div className="optrow-main">
+                        <label className="field grow">
+                          <span className="field-label">Option {index + 1}</span>
+                          <input
+                            className="input"
+                            type="datetime-local"
+                            value={option.start}
+                            onChange={(event) => updateOption(option.id, event.target.value)}
+                          />
+                        </label>
+                        <button
+                          className="btn btn-danger-text"
+                          onClick={() => removeOption(option.id)}
+                          type="button"
+                          disabled={options.length <= 1}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      {track ? (
+                        <div className="optrow-track">
+                          <span className="optrow-day">
+                            {track.weekday} {track.day}
+                          </span>
+                          <span className="track">
+                            <span className="track-noon" />
+                            <span
+                              className="track-fill"
+                              style={{
+                                ['--from' as string]: `${track.from}%`,
+                                ['--span' as string]: `${Math.max(
+                                  2,
+                                  (durationMinutes / (18 * 60)) * 100,
+                                )}%`,
+                              }}
+                            />
+                          </span>
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="row">
+                <button
+                  className="btn btn-quiet btn-small"
+                  onClick={addOption}
+                  type="button"
+                  disabled={!canAddOption}
+                >
+                  Add an option
+                </button>
                 {slotsTouched ? (
                   <button
-                    className="button button-secondary"
+                    className="btn btn-text btn-small"
                     onClick={resetSlotsToTemplate}
                     type="button"
                   >
-                    Reset to template
+                    Back to the {TEMPLATE_CONFIG[template].label.toLowerCase()} defaults
                   </button>
                 ) : null}
-                <button className="button button-secondary" onClick={addOption} type="button">
-                  Add option
-                </button>
+                {!canAddOption ? <span className="field-hint">Five is the maximum.</span> : null}
               </div>
-              <div className="option-list">
-                {options.map((option, index) => (
-                  <div className="option-row" key={option.id}>
-                    <label className="field">
-                      <span>Option {index + 1}</span>
-                      <input
-                        type="datetime-local"
-                        value={option.start}
-                        onChange={(event) => updateOption(option.id, event.target.value)}
-                      />
-                    </label>
-                    <button
-                      className="inline-link"
-                      onClick={() => removeOption(option.id)}
-                      type="button"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <p className="helper-copy">
-                Backend rule: 3 to 5 manual options, locked after send. Template pre-fills sensible
-                windows you can edit.
-              </p>
             </>
           ) : (
             <>
-              <p className="helper-copy">
-                We&rsquo;ll pick {autoSuggestionLimit} slots inside your constraints and the
-                organizer&rsquo;s saved availability. Each suggestion includes a one-line reason.
+              <p className="field-hint">
+                SYZY searches your saved availability and connected calendar inside these limits,
+                then puts the best {autoSuggestionLimit} openings up for a vote.
               </p>
-              <div className="field-grid">
+              <div className="pair">
                 <label className="field">
-                  <span>Start date</span>
+                  <span className="field-label">Search from</span>
                   <input
+                    className="input"
                     type="date"
                     value={autoStartDate}
                     onChange={(event) => setAutoStartDate(event.target.value)}
                   />
                 </label>
                 <label className="field">
-                  <span>End date</span>
+                  <span className="field-label">Search until</span>
                   <input
+                    className="input"
                     type="date"
                     value={autoEndDate}
                     onChange={(event) => setAutoEndDate(event.target.value)}
@@ -654,44 +706,44 @@ export default function CreatePage() {
                 </label>
               </div>
               <div className="field">
-                <span>Days of week</span>
-                <div className="weekday-chip-row">
-                  {WEEKDAY_CHIPS.map((day) => {
-                    const isActive = autoWeekdays.includes(day.value);
-                    return (
-                      <button
-                        key={day.value}
-                        type="button"
-                        className={`weekday-chip${isActive ? ' weekday-chip-active' : ''}`}
-                        aria-pressed={isActive}
-                        onClick={() => toggleWeekday(day.value)}
-                      >
-                        {day.label}
-                      </button>
-                    );
-                  })}
+                <span className="field-label">Days that work</span>
+                <div className="chips">
+                  {WEEKDAY_CHIPS.map((day) => (
+                    <button
+                      key={day.value}
+                      type="button"
+                      className="chip"
+                      aria-pressed={autoWeekdays.includes(day.value)}
+                      onClick={() => toggleWeekday(day.value)}
+                    >
+                      {day.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <div className="field-grid">
+              <div className="pair">
                 <label className="field">
-                  <span>Earliest start (local)</span>
+                  <span className="field-label">No earlier than</span>
                   <input
+                    className="input"
                     type="time"
                     value={autoWindowStart}
                     onChange={(event) => setAutoWindowStart(event.target.value)}
                   />
                 </label>
                 <label className="field">
-                  <span>Latest end (local)</span>
+                  <span className="field-label">No later than</span>
                   <input
+                    className="input"
                     type="time"
                     value={autoWindowEnd}
                     onChange={(event) => setAutoWindowEnd(event.target.value)}
                   />
                 </label>
                 <label className="field">
-                  <span>How many suggestions</span>
+                  <span className="field-label">How many to offer</span>
                   <input
+                    className="input"
                     type="number"
                     min={1}
                     max={10}
@@ -703,37 +755,36 @@ export default function CreatePage() {
                 </label>
               </div>
               <label className="field">
-                <span>Exclude dates (comma-separated, YYYY-MM-DD)</span>
+                <span className="field-label">Skip these dates (optional)</span>
                 <input
+                  className="input"
                   type="text"
                   value={autoExcludes}
                   placeholder="2026-05-30, 2026-06-01"
                   onChange={(event) => setAutoExcludes(event.target.value)}
                 />
               </label>
-              <div className="button-group">
+              <div className="row">
                 <button
                   type="button"
-                  className="button button-secondary"
+                  className="btn btn-quiet btn-small"
                   disabled={isPreviewing}
                   onClick={previewAutoSuggestions}
                 >
-                  {isPreviewing ? 'Searching…' : 'Preview suggestions'}
+                  {isPreviewing ? 'Searching…' : 'Show me what it finds'}
                 </button>
               </div>
               {autoPreview ? (
                 autoPreview.length === 0 ? (
-                  <p className="helper-copy">No slots match those constraints. Widen the window or add days.</p>
+                  <p className="note">
+                    Nothing is open inside those limits. Try widening the hours or adding a day.
+                  </p>
                 ) : (
-                  <ul className="suggestion-list">
+                  <ul className="stack-tight">
                     {autoPreview.map((slot, index) => (
-                      <li key={slot.start_at + index} className="suggestion-item">
-                        <strong>
-                          {new Date(slot.start_at).toLocaleString(undefined, { timeZone: timezone })}
-                        </strong>
-                        <span className="helper-copy">
-                          {slot.reasons.join(' · ')} · score {slot.score.toFixed(2)}
-                        </span>
+                      <li key={slot.start_at + index} className="suggestion">
+                        <strong>{formatMoment(slot.start_at, timezone)}</strong>
+                        <span className="field-hint">{slot.reasons.join(' · ')}</span>
                       </li>
                     ))}
                   </ul>
@@ -743,10 +794,67 @@ export default function CreatePage() {
           )}
         </section>
 
-        {error ? <p className="error-text">{error}</p> : null}
+        <section className="card reveal" style={{ ['--i' as string]: 3 }}>
+          <h2 className="title-card">Who&rsquo;s coming</h2>
+          <label className="field">
+            <span className="field-label">One person per line</span>
+            <textarea
+              className="input"
+              rows={5}
+              value={participants}
+              onChange={(event) => setParticipants(event.target.value)}
+              placeholder="Alex | alex@example.com"
+            />
+            <span className="field-hint">
+              Name, then a pipe, then an email or phone. Email gets them their own link.
+            </span>
+          </label>
+          {parsedParticipants.length > 0 ? (
+            <div className="chips" aria-live="polite">
+              {parsedParticipants.map((person, index) => (
+                <span className="pill pill-name" key={`${person.displayName}-${index}`}>
+                  <span className="dot" data-tone={person.email ? 'in' : 'waiting'} />
+                  {person.displayName}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </section>
 
-        <button className="button button-primary" disabled={isSubmitting} type="submit">
-          {isSubmitting ? 'Creating...' : 'Create request'}
+        <section className="card reveal" style={{ ['--i' as string]: 4 }}>
+          <h2 className="title-card">Chasing people</h2>
+          <div className="pair">
+            <label className="field">
+              <span className="field-label">Answers due by</span>
+              <input
+                className="input"
+                type="datetime-local"
+                value={responseDeadline}
+                onChange={(event) => setResponseDeadline(event.target.value)}
+              />
+            </label>
+            <div className="field">
+              <span className="field-label">Reminders</span>
+              <label className="check">
+                <input
+                  checked={remindersEnabled}
+                  onChange={(event) => setRemindersEnabled(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Nudge anyone who hasn&rsquo;t answered</span>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        {error ? (
+          <p className="note" data-tone="bad" role="alert">
+            {error}
+          </p>
+        ) : null}
+
+        <button className="btn btn-wide" disabled={isSubmitting} type="submit">
+          {isSubmitting ? 'Creating…' : 'Create request'}
         </button>
       </form>
     </main>

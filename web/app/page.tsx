@@ -1,64 +1,83 @@
 import Link from 'next/link';
 
+import { HeroSlots } from '../components/HeroSlots';
+import { RecentRequests } from '../components/RecentRequests';
+
 export default function HomePage() {
   return (
-    <main className="shell">
-      <section className="hero">
-        <div className="hero-copy">
-          <p className="eyebrow">SYZY - Next.js-first</p>
-          <h1>Use chat for discussion. Use SYZY for decision and follow-through.</h1>
+    <main className="wrap page">
+      <section className="hero-grid">
+        <div className="stack-loose reveal" style={{ ['--i' as string]: 0 }}>
+          <h1 className="title-hero">
+            <span>Pick a time</span> <span>before the thread</span> <span>dies.</span>
+          </h1>
           <p className="lede">
-            A mobile-web scheduling flow for meals, coffee, hangouts, and small group plans. No
-            app install required for guests.
+            Send one link to the group chat. Everyone taps a time in their browser — no account, no
+            app. You confirm the winner and it lands on their calendars.
           </p>
-          <div className="hero-actions">
-            <Link className="button button-primary" href="/create">
+          <div className="row">
+            <Link className="btn" href="/create">
               Create a request
             </Link>
-            <Link className="button button-secondary" href="/create">
-              Start web prototype
-            </Link>
+            <a className="btn btn-quiet" href="#how">
+              How it works
+            </a>
           </div>
         </div>
-        <div className="hero-card">
-          <div className="stat-row">
-            <span>Entry point</span>
-            <strong>Shared link in a group chat</strong>
-          </div>
-          <div className="stat-row">
-            <span>Organizer goal</span>
-            <strong>Get from "maybe" to booked</strong>
-          </div>
-          <div className="stat-row">
-            <span>Attendee friction</span>
-            <strong>No account required</strong>
-          </div>
-          <div className="stat-row">
-            <span>Core MVP</span>
-            <strong>Manual poll + response link + reminders + confirmation artifact</strong>
-          </div>
+
+        <div className="reveal" style={{ ['--i' as string]: 1 }}>
+          <HeroSlots />
         </div>
       </section>
 
-      <section className="grid-two">
-        <article className="panel">
-          <p className="section-label">Why web first</p>
-          <h2>Less friction at the exact moment people are asked to respond.</h2>
-          <p>
-            The first interaction is usually a text message, not an app store search. A Next.js-first
-            launch keeps the invite flow native to how people already coordinate.
+      <hr className="hairline" />
+
+      <section className="stack-loose" id="how">
+        <h2 className="title-page">Three moves, one booked plan.</h2>
+        <ol className="steps">
+          <li className="step">
+            <h3>Propose</h3>
+            <p>
+              Start from a shape — meal, coffee, study, hangout — and put up to five times on the
+              table. Or let SYZY read your calendar and pick the openings for you.
+            </p>
+          </li>
+          <li className="step">
+            <h3>Share</h3>
+            <p>
+              Paste the link in the chat. Everyone gets their own private link too, so a nudge goes
+              straight to the person who hasn’t answered.
+            </p>
+          </li>
+          <li className="step">
+            <h3>Confirm</h3>
+            <p>
+              Watch the votes land, pick the winner, and SYZY writes it to your Google Calendar and
+              sends everyone an invite they can save.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <RecentRequests />
+
+      <hr className="hairline" />
+
+      <section className="pair">
+        <div className="stack-tight">
+          <p className="label">Guests stay guests</p>
+          <p className="muted">
+            Attendees never make an account. They are recognized by the link they were sent, and can
+            change their answer any time from the same link.
           </p>
-        </article>
-        <article className="panel">
-          <p className="section-label">What this version covers</p>
-          <ul className="flat-list">
-            <li>Create a request with 3-5 manual options</li>
-            <li>View organizer request details</li>
-            <li>Open an attendee response page from a link</li>
-            <li>Ping non-responders</li>
-            <li>Confirm a winning option and download an ICS artifact</li>
-          </ul>
-        </article>
+        </div>
+        <div className="stack-tight">
+          <p className="label">Calendars stay private</p>
+          <p className="muted">
+            When you connect Google Calendar, SYZY reads free and busy time only. Event titles,
+            guests, and notes are never fetched.
+          </p>
+        </div>
       </section>
     </main>
   );
