@@ -112,11 +112,52 @@ Auth is **flag-gated** (`lib/supabase.ts:isAuthEnabled`). With `NEXT_PUBLIC_SUPA
 - `/signin` — organizer magic-link sign-in (only meaningful when auth is enabled)
 - `/create` — organizer create-request flow (auth-gated)
 - `/request/[id]` — organizer detail / progress / finalize (auth-gated)
-- `/respond/[id]` — attendee response page hit via shared link (public)
+- `/settings/availability` — weekly hours, one-off blocks, Google connection (auth-gated)
+- `/events/[id]/respond` — attendee response page (public; `?token=` for a private invite link)
+- `/respond/[id]` — legacy share-token URL, redirects to `/events/[id]/respond` (public)
+
+### Design system
+
+`app/globals.css` holds the whole system — tokens, then `@layer reset, base,
+layout, components, utilities` so specificity conflicts stay impossible.
+There is no CSS framework and no per-page CSS.
+
+- **The slot is the product.** `components/Slot.tsx` renders every proposed
+  time as a date block plus a 6am–midnight rail with the slot's real position
+  and length filled in. It carries four states — `open`, `picked`, `won`
+  (solid ink), `lost` (receded) — and the same component appears on the
+  landing hero, the create form, the organizer view, and the attendee page.
+  Anything that shows a time should use it rather than formatting a string.
+- **Colour encodes state, it never decorates.** Cobalt = picked or active,
+  ochre = waiting on someone, solid ink = decided, jade = a transient
+  confirmation (copied, saved). Do not introduce a new accent for emphasis.
+- **Times are always formatted through `lib/time.ts`** in an explicit IANA
+  zone (`shapeSlot`, `formatMoment`, `zoneLabel`). The organizer schedules in
+  their zone, attendees read in theirs; never let the machine's local zone
+  leak in implicitly.
+- Type is Bricolage Grotesque (display) + Instrument Sans (text), loaded via
+  `next/font/google` in `app/layout.tsx`.
+- `components/TopRail.tsx` is the global chrome. It deliberately renders the
+  mark alone on attendee paths — someone who arrived from a group chat is
+  there to tap a time, not to browse a product.
+- `lib/recents.ts` keeps a local list of requests created in this browser,
+  because the backend has no `GET /v1/requests`. It is a convenience, never a
+  source of truth. If that endpoint lands, replace it.
 
 `lib/api.ts` is the single source of truth for backend contracts — the `OrganizerRequestDetail` and `PublicSharePayload` types mirror what `/v1/requests/{id}` and `/v1/share/public/{token}` return. When changing a backend payload, update both ends in the same change.
 
-There are no automated frontend tests yet (`ToDos.md` calls this out as a planned addition).
+Frontend tests are Playwright end-to-end specs in `web/tests-e2e/`, including
+an axe pass that fails on serious/critical violations:
+
+```powershell
+# from web/ — starts its own dev server on :3100
+npx playwright test
+```
+
+Specs that need data hit the backend directly (`tests-e2e/helpers.ts`) and
+skip themselves when it is unreachable. Note that an invited email can only
+respond through its `invite_token`; posting a bare email to
+`/v1/events/{id}/responses` returns `check_email` instead of saving.
 
 ## Legacy Flutter App (`legacy/app/`)
 
