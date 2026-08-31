@@ -4,15 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Layout
 
-This is the parent repository for three Git submodules:
+This is a **monorepo**. All code lives in one Git repository:
 
 - `backend/` — FastAPI + Postgres + Redis + Celery service. Active.
 - `web/` — Next.js 15 / React 19 web frontend. **Active launch surface.**
-- `app/` — Legacy Flutter native app prototype. **Reference only**, driven by mock data, not the launch frontend. Do not extend this unless the user explicitly asks.
+- `legacy/app/` — Legacy Flutter native app prototype. **Reference only**, driven by mock data, not the launch frontend. Do not extend this unless the user explicitly asks.
 
 Top-level docs (`Social Calendar App PRD.txt`, `EXECUTION_ROADMAP.md`, `CHANGELOG.md`, `ToDos.md`) describe the product: SYZY, a link-first social scheduling tool. Organizer creates a request in the web app, shares a tokenized link in chat, attendees respond on mobile web without an account, organizer confirms a winner, backend writes the event back to Google Calendar and emits ICS.
 
-Each subproject remains an independent repository. Run child-repository Git commands from the relevant submodule directory; run parent-repository Git commands from this directory.
+There is a single Git repository — run all Git commands from the repository root. A change that spans `backend/` and `web/` should be **one commit**, not two; this is what makes the "update both ends in the same change" rule below enforceable.
+
+This repo was converted from three Git submodules on 2026-08-31. Full history of all three subprojects is preserved, rewritten under the paths above.
 
 ## Backend (`backend/`)
 
@@ -116,7 +118,7 @@ Auth is **flag-gated** (`lib/supabase.ts:isAuthEnabled`). With `NEXT_PUBLIC_SUPA
 
 There are no automated frontend tests yet (`ToDos.md` calls this out as a planned addition).
 
-## Legacy Flutter App (`app/`)
+## Legacy Flutter App (`legacy/app/`)
 
 Kept for UI/design reference. Driven by mock data, not wired to the backend. Per the project's own README and roadmap, do not add features here unless the user explicitly returns to a native-client strategy. If asked to make a frontend change without qualification, assume `web/` is the target.
 

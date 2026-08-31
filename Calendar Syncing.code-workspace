@@ -1,0 +1,16 @@
+{
+    "folders": [
+        {
+            "name": "Calendar Syncing",
+            "path": "."
+        }
+    ],
+    "settings": {
+        "git.autoRepositoryDetection": true,
+        "git.detectSubmodules": false,
+        "files.exclude": {
+            "**/__pycache__": true,
+            "**/.pytest_cache": true
+        }
+    }
+}

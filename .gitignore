@@ -2,3 +2,7 @@
 .codex_prd_extract/
 .vscode/
 .tools/
+
+# Local logs
+debug.log
+*.log
