@@ -53,7 +53,7 @@ class _CreateRequestFlowState extends ConsumerState<CreateRequestFlow> {
                 email:
                     '${entry.value.toLowerCase().replaceAll(' ', '.')}@mail.co',
               ))
-          .toList(),
+          ,
     ];
   }
 
@@ -134,7 +134,7 @@ class _CreateRequestFlowState extends ConsumerState<CreateRequestFlow> {
         ),
         const SizedBox(height: 16),
         DropdownButtonFormField<int>(
-          value: _duration,
+          initialValue: _duration,
           decoration: const InputDecoration(labelText: 'Duration'),
           items: const [
             DropdownMenuItem(value: 15, child: Text('15 minutes')),
@@ -152,7 +152,7 @@ class _CreateRequestFlowState extends ConsumerState<CreateRequestFlow> {
         ),
         const SizedBox(height: 16),
         DropdownButtonFormField<String>(
-          value: _timezone,
+          initialValue: _timezone,
           decoration: const InputDecoration(labelText: 'Timezone'),
           items: const [
             DropdownMenuItem(value: 'Eastern Time', child: Text('Eastern Time')),

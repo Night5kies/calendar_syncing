@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/mock_repository.dart';
-import '../models/conversation.dart';
 import '../models/meeting_request.dart';
 import '../models/message.dart';
 import '../models/participant.dart';

@@ -1,16 +1,19 @@
-# calendar_syncing_app
+# Legacy Flutter Prototype
 
-A new Flutter project.
+This directory is a legacy Flutter prototype kept as reference material while the active product moves forward in `web/`.
 
-## Getting Started
+## Current status
 
-This project is a starting point for a Flutter application.
+- Not the launch frontend
+- Still driven by mock data
+- Useful only as UI/reference material unless the project intentionally returns to a native-client strategy later
 
-A few resources to get you started if this is your first Flutter project:
+## Active product surface
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+The shipping direction in this repo is:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- Next.js web app in `web/`
+- FastAPI backend in `backend/`
+- link-first attendee flow in mobile web
+
+If native work resumes later, treat this Flutter app as a design/reference base rather than a production-ready client.
