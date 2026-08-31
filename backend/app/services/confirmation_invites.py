@@ -72,6 +72,19 @@ def _read_ics_body(scheduled: ScheduledEvent) -> str | None:
     return path.read_text(encoding="utf-8")
 
 
+def _ics_method(ics_body: str) -> str:
+    """Mirror the METHOD declared inside the file.
+
+    The MIME part's `method` parameter and the VCALENDAR METHOD property have
+    to agree; hard-coding REQUEST here while the body said PUBLISH left some
+    clients refusing to render the invite.
+    """
+    for line in ics_body.splitlines():
+        if line.upper().startswith("METHOD:"):
+            return line.split(":", 1)[1].strip() or "PUBLISH"
+    return "PUBLISH"
+
+
 def dispatch_confirmation_invites(
     db: Session,
     *,
@@ -105,6 +118,7 @@ def dispatch_confirmation_invites(
 
     sent = 0
     skipped = 0
+    failed = 0
     for participant in participants:
         if not participant.email:
             skipped += 1
@@ -126,13 +140,19 @@ def dispatch_confirmation_invites(
                 "timezone": scheduled.timezone,
             },
         )
+        # A savepoint, not db.rollback(): a plain rollback here discarded the
+        # caller's entire uncommitted transaction -- the ScheduledEvent insert
+        # and the request's move to "confirmed" included -- so one duplicate
+        # notification row silently unwound the whole confirmation.
+        savepoint = db.begin_nested()
         db.add(log)
         try:
             db.flush()
         except IntegrityError:
-            db.rollback()
+            savepoint.rollback()
             skipped += 1
             continue
+        savepoint.commit()
 
         attachments = (
             [
@@ -140,7 +160,7 @@ def dispatch_confirmation_invites(
                     filename=ics_filename,
                     media_type="text/calendar",
                     content=ics_body,
-                    method="REQUEST",
+                    method=_ics_method(ics_body),
                 )
             ]
             if ics_body
@@ -160,11 +180,15 @@ def dispatch_confirmation_invites(
             attachments=attachments,
         )
         log.status = delivery.status
-        sent += 1
+        if delivery.status == "failed":
+            failed += 1
+        else:
+            sent += 1
 
     return {
         "sent_count": sent,
         "skipped_count": skipped,
+        "failed_count": failed,
         "participant_count": len(participants),
         "scheduled_event_id": str(scheduled.id),
     }

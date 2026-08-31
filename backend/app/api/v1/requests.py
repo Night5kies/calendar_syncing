@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -34,10 +35,12 @@ from app.services.meeting_requests import (
     scheduled_event_snapshot,
     validate_manual_proposal_rules,
 )
+from app.services.calendar import merge_intervals
 from app.services.scheduling import (
     Interval,
     generate_suggestions,
     load_organizer_constraints,
+    local_day_range,
     materialize_suggestions,
     parse_inputs_from_payload,
 )
@@ -52,6 +55,8 @@ from app.services.participants import (
 from app.models.profile import Profile
 from app.services.confirmation_invites import dispatch_confirmation_invites
 from app.services.scheduled_events import finalize_scheduled_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -440,23 +445,37 @@ def suggest_proposals(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
 
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-
-    range_start = _dt.combine(inputs.start_date, _dt.min.time(), tzinfo=_tz.utc)
-    range_end = _dt.combine(inputs.end_date, _dt.min.time(), tzinfo=_tz.utc) + _td(days=1)
+    # The suggestion window is a range of *local* dates, so the busy lookup has
+    # to span local midnight-to-midnight. Building it from UTC midnights lost
+    # the offset at both ends -- for UTC-5 the last evening of the range was
+    # never checked against the calendar, and slots there could be suggested on
+    # top of real events.
+    try:
+        range_start, range_end = local_day_range(
+            inputs.start_date, inputs.end_date, inputs.timezone
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
     organizer_rule, blocked_intervals = load_organizer_constraints(
         db, current_user.user_id, range_start, range_end
     )
 
     google_busy: list[Interval] = []
-    connection = db.execute(
-        select(CalendarConnection).where(
-            CalendarConnection.user_id == current_user.user_id,
-            CalendarConnection.provider == "google",
-            CalendarConnection.revoked_at.is_(None),
+    connection = (
+        db.execute(
+            select(CalendarConnection)
+            .where(CalendarConnection.user_id == current_user.user_id)
+            .where(CalendarConnection.provider == "google")
+            .where(CalendarConnection.revoked_at.is_(None))
+            .order_by(CalendarConnection.created_at.desc())
+            .limit(1)
         )
-    ).scalar_one_or_none()
+        .scalars()
+        .first()
+    )
     if connection and connection.access_token:
         calendars = (
             db.execute(
@@ -468,11 +487,33 @@ def suggest_proposals(
             .scalars()
             .all()
         )
-        calendar_ids = [calendar.provider_calendar_id for calendar in calendars] or ["primary"]
+        has_any_calendar = db.execute(
+            select(func.count())
+            .select_from(ProviderCalendar)
+            .where(ProviderCalendar.user_id == current_user.user_id)
+            .where(ProviderCalendar.provider == "google")
+        ).scalar_one()
+        calendar_ids = [calendar.provider_calendar_id for calendar in calendars]
+        if not calendar_ids and not has_any_calendar:
+            # Nothing discovered yet -- fall back to the account's default.
+            # If calendars *are* known and the user disabled them all, that is
+            # a deliberate choice and must not be overridden with "primary".
+            calendar_ids = ["primary"]
         try:
-            busy = google.fetch_busy_intervals(connection, calendar_ids, range_start, range_end)
-            google_busy = [Interval(start=start, end=end) for start, end in busy]
+            busy = (
+                google.fetch_busy_intervals(connection, calendar_ids, range_start, range_end)
+                if calendar_ids
+                else []
+            )
+            google_busy = [
+                Interval(start=start, end=end) for start, end in merge_intervals(busy)
+            ]
         except Exception:  # pragma: no cover - integration path
+            logger.warning(
+                "Google busy lookup failed for organizer %s; suggesting without it",
+                current_user.user_id,
+                exc_info=True,
+            )
             google_busy = []
 
     try:

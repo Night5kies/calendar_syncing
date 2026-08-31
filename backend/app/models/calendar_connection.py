@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
+from app.db.types import EncryptedText
 
 
 class CalendarConnection(Base):
@@ -18,8 +19,10 @@ class CalendarConnection(Base):
     provider: Mapped[str] = mapped_column(String(32))
     provider_account_id: Mapped[str] = mapped_column(String(255))
     provider_email: Mapped[str | None] = mapped_column(String(320))
-    access_token: Mapped[str | None] = mapped_column(Text)
-    refresh_token: Mapped[str | None] = mapped_column(Text)
+    # Encrypted at rest -- see app/core/crypto.py. Application code still
+    # reads and writes these as plaintext.
+    access_token: Mapped[str | None] = mapped_column(EncryptedText)
+    refresh_token: Mapped[str | None] = mapped_column(EncryptedText)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scopes: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())

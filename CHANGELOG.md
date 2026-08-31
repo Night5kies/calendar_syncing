@@ -1,5 +1,76 @@
 # Change Log
 
+## 2026-08-31
+
+### Calendar sync audit — correctness, security, and cache fixes
+An end-to-end review of the Google Calendar sync path turned up a set of bugs
+ranging from a guaranteed 500 on finalize to an account-linking CSRF. All fixed
+in one pass, with the backend suite going from 63 tests (11 skipped) to 138.
+
+**Blocking**
+- `choose_google_calendar_id` and `get_google_connection` used
+  `scalar_one_or_none()` on queries that legitimately return several rows, so
+  any organizer with more than one enabled Google calendar — the common case, and
+  guaranteed by the `selected` default bug below — raised `MultipleResultsFound`
+  and 500'd `POST /requests/{id}/finalize`. Now `.limit(1)` + `.first()`.
+- `dispatch_confirmation_invites` called `db.rollback()` on a duplicate
+  notification row, discarding the caller's entire uncommitted transaction (the
+  `ScheduledEvent` insert and the request's move to `confirmed` included) while
+  still returning success. Now uses a `begin_nested()` savepoint.
+
+**Security**
+- OAuth `state` was unsigned base64 whose `uid` was trusted verbatim, allowing an
+  attacker to bind their Google account to a victim's SYZY account. It is now
+  HMAC-signed and time-boxed (`OAUTH_STATE_TTL_SECONDS`).
+- `return_to` was an unvalidated redirect target; it is now confined to an
+  origin allowlist.
+- Disconnect never revoked the grant at Google and left cached events, provider
+  calendars, and busy blocks behind — so `/calendar/overlay` kept sharing a
+  disconnected calendar indefinitely. It now revokes upstream and purges.
+- Provider OAuth tokens are encrypted at rest (`TOKEN_ENCRYPTION_KEY`).
+- Revoked connections are now filtered out of every read path.
+
+**Sync fidelity**
+- Followed `nextPageToken`; the fetch previously truncated at 250 events.
+- Cancelled, "Free" (`transparency: transparent`), self-declined, and
+  annotation-type events no longer count as busy.
+- The event cache now prunes anything the provider stopped reporting, so deleted
+  and rescheduled events stop blocking time forever.
+- All-day events are interpreted in the calendar's zone, not UTC.
+- `/suggest` builds its busy window from local dates instead of UTC midnights,
+  which had left a multi-hour gap at one end of every range.
+- `refresh_busy_cache` runs once per sync instead of once per connection, where
+  the last provider erased every earlier provider's busy blocks.
+- `provider_calendars.is_enabled` is no longer overwritten from the provider,
+  which had silently undone the user's own toggle.
+- `calendar_sync_state` makes an empty window cacheable instead of re-hitting
+  Google on every request.
+- Provider failures are caught and logged; `/calendar/events` and
+  `/calendar/overlay` serve cached data instead of 500ing on a Google outage.
+
+**ICS and write-back**
+- `DTSTAMP` is generation time (was the event start), `SEQUENCE` increments per
+  re-issue, `ATTENDEE` lines are emitted, the body `METHOD` matches the MIME
+  part's, and lines fold at 75 octets.
+- Write-back is idempotent: re-finalizing updates the existing Google event, and
+  a failed retry keeps the existing `provider_event_id` rather than orphaning it.
+- Google-side attendee invites are behind `GOOGLE_INVITE_ATTENDEES` (default
+  off), since attendees already receive the SYZY email with an ICS attachment.
+
+**Input validation**
+- Malformed timestamps and unknown timezones now return 422 rather than 500, and
+  calendar read windows are capped at `CALENDAR_MAX_WINDOW_DAYS`.
+
+Migration `a2f7c4b8d915` adds `calendar_sync_state` and
+`scheduled_events.artifact_sequence`.
+
+### Verification
+- Backend: `python -m unittest discover -s tests` → 138 passed, 0 skipped.
+- `alembic upgrade head` clean against local Postgres.
+- `python scripts/test_reminder_flow.py` end-to-end flow passes through finalize.
+- Manual: forged OAuth state → 400; bad timestamp / inverted range / oversized
+  window → 422.
+
 ## 2026-06-29 (later 4)
 
 ### Stage 10 (sub-project 4) — Accessibility pass

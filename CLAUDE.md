@@ -129,3 +129,39 @@ Kept for UI/design reference. Driven by mock data, not wired to the backend. Per
 - **Reminders are capped at `MAX_REMINDERS_PER_PARTICIPANT = 3`** as anti-spam.
 - **Attendees never have accounts.** They are identified by `guest_key` plus optional email/phone, and matched server-side by email → phone → guest_key fallback.
 - **Privacy default is free/busy, never event titles.** Any new calendar-read feature should preserve this.
+
+## Calendar Sync Invariants
+
+The Google sync path has a few rules that are easy to break by accident:
+
+- **Provider tokens are encrypted at rest** via the `EncryptedText` column type
+  (`app/db/types.py` + `app/core/crypto.py`). Application code still reads and
+  writes plaintext. Set `TOKEN_ENCRYPTION_KEY` in production; rows written
+  before a key existed keep working and are re-encrypted on next write.
+- **OAuth `state` is HMAC-signed and time-boxed** (`_encode_state` /
+  `_decode_state` in `app/api/v1/calendar.py`). Never trust a `uid` out of an
+  unverified state, and always run `return_to` through `sanitize_return_to` --
+  an unsigned state allowed account-linking CSRF and an open redirect.
+- **Only busy time counts as busy.** `google.is_busy_event` drops cancelled,
+  `transparency: transparent` ("Free"), self-declined, and annotation-type
+  events. Widening the fetch without this filter double-books people.
+- **Every provider read is paginated** (`google._paginate`); a bare first page
+  silently truncates at 250 events.
+- **All-day events are midnight-to-midnight in the calendar's zone**, not UTC.
+- **`sync_event_cache` makes the window match the provider exactly**, pruning
+  rows the provider no longer reports. Upsert-only leaves deleted and moved
+  events behind as permanent phantom busy blocks.
+- **`refresh_busy_cache` clears the window before rewriting it**, so it must run
+  once per sync across all providers -- never inside the per-connection loop.
+- **`calendar_sync_state` makes an empty window cacheable.** "No cached rows" is
+  not the same as "never fetched"; use `is_window_stale`, not row counts.
+- **Suggestion windows are local-date ranges** (`scheduling.local_day_range`).
+  Deriving the busy window from UTC midnights leaves a gap at one end.
+- **`provider_calendars.is_enabled` is the user's toggle**, not the provider's.
+  `refresh_provider_calendars` deliberately does not sync it back.
+- **A user may have several connections and several enabled calendars.** Select
+  with `.limit(1)` + `.first()`; `scalar_one_or_none()` raises
+  `MultipleResultsFound` and used to 500 the whole finalize.
+- **Write-back is idempotent**: re-finalizing updates the existing Google event
+  and bumps the ICS `SEQUENCE`. A failed write-back keeps the existing
+  `provider_event_id` rather than orphaning the event.

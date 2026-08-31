@@ -10,6 +10,9 @@ pydantic==2.10.2
 pydantic-settings==2.6.1
 
 python-jose[cryptography]==3.3.0
+# Direct dependency: Fernet encryption for provider OAuth tokens at rest
+# (app/core/crypto.py). Previously only present transitively via python-jose.
+cryptography==42.0.5
 
 redis==5.2.0
 celery==5.4.0

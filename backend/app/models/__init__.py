@@ -3,6 +3,7 @@ from .availability_rule import AvailabilityRule
 from .busy_cache import BusyCache
 from .calendar_connection import CalendarConnection
 from .calendar_share import CalendarShare
+from .calendar_sync_state import CalendarSyncState
 from .event_cache import EventCache
 from .meeting_request import MeetingRequest
 from .notification_event import NotificationEvent

@@ -30,5 +30,8 @@ class ScheduledEvent(Base):
     provider_event_id: Mapped[str | None] = mapped_column(String(255))
     artifact_path: Mapped[str | None] = mapped_column(String(500))
     artifact_uid: Mapped[str | None] = mapped_column(String(255))
+    # Bumped on every re-finalize so a re-issued ICS carries a higher
+    # SEQUENCE and calendar clients treat it as an update, not a duplicate.
+    artifact_sequence: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     status: Mapped[str] = mapped_column(String(32), default="confirmed", index=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())

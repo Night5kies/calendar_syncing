@@ -48,6 +48,25 @@ class Settings(BaseSettings):
         "https://www.googleapis.com/auth/calendar.readonly "
         "https://www.googleapis.com/auth/calendar.events"
     )
+    google_oauth_revoke_url: str = "https://oauth2.googleapis.com/revoke"
+    # OAuth `state` is HMAC-signed with `supabase_jwt_secret` and only accepted
+    # inside this window, so a forged/replayed state cannot bind a Google
+    # account to someone else's SYZY account.
+    oauth_state_ttl_seconds: int = 600
+    # Fernet key (urlsafe base64, 32 bytes) used to encrypt provider OAuth
+    # tokens at rest. Unset means tokens are stored as plaintext, which is
+    # acceptable for local dev only -- production must set this.
+    token_encryption_key: Optional[str] = None
+    # Google's calendarList/events pages are followed up to this many times so
+    # a busy calendar cannot silently truncate at the first page.
+    google_max_pages: int = 20
+    # Upper bound on a single calendar read window, to keep one request from
+    # fanning out into an unbounded number of Google calls.
+    calendar_max_window_days: int = 400
+    # Whether the Google Calendar write-back invites attendees directly.
+    # Off by default: attendees already receive the SYZY confirmation email
+    # with an ICS attachment, so enabling this double-notifies them.
+    google_invite_attendees: bool = False
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:3000",
@@ -62,6 +81,17 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+
+    @property
+    def allowed_return_to_origins(self) -> set[str]:
+        """Origins a post-OAuth `return_to` is allowed to redirect to.
+
+        Anything outside this set is replaced with `app_base_url`, so a
+        crafted `state` cannot turn the callback into an open redirect.
+        """
+        origins = {origin.rstrip("/") for origin in self.cors_origins}
+        origins.add(self.app_base_url.rstrip("/"))
+        return origins
 
     @property
     def effective_database_url(self) -> str:

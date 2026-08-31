@@ -1,18 +1,37 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Iterable
+from typing import Sequence
 
 
 FRESHNESS_MINUTES = 10
 
 
-def is_cache_stale(last_fetched_at_values: Iterable[datetime]) -> bool:
-    threshold = datetime.now(timezone.utc) - timedelta(minutes=FRESHNESS_MINUTES)
-    values = list(last_fetched_at_values)
-    if not values:
-        return True
-    return any(value < threshold for value in values)
+def freshness_threshold(now: datetime | None = None) -> datetime:
+    now = now or datetime.now(timezone.utc)
+    return now - timedelta(minutes=FRESHNESS_MINUTES)
+
+
+def is_window_stale(
+    markers: Sequence[tuple[datetime, datetime, datetime]],
+    start_at: datetime,
+    end_at: datetime,
+    now: datetime | None = None,
+) -> bool:
+    """Whether [start_at, end_at) needs a re-fetch.
+
+    `markers` are `(window_start, window_end, last_synced_at)` rows. The window
+    is fresh when some marker both covers the requested range and was synced
+    inside the freshness horizon. This is what makes an empty window cacheable:
+    the marker exists even when the sync returned zero events.
+    """
+    threshold = freshness_threshold(now)
+    for window_start, window_end, last_synced_at in markers:
+        if last_synced_at < threshold:
+            continue
+        if window_start <= start_at and window_end >= end_at:
+            return False
+    return True
 
 
 def merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:

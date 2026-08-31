@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, Sequence
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -146,6 +146,34 @@ def _overlaps_blocked(start: datetime, end: datetime, blocked: Sequence[Interval
     return False
 
 
+def resolve_timezone(timezone_name: str) -> ZoneInfo:
+    """Look up an IANA zone, reporting an unknown name as a ValueError.
+
+    `timezone` is caller-supplied and unvalidated at request creation, and a
+    bare ZoneInfoNotFoundError surfaced as a 500 rather than a 422.
+    """
+    try:
+        return ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"unknown timezone: {timezone_name}") from exc
+
+
+def local_day_range(
+    start_date: date, end_date: date, timezone_name: str
+) -> tuple[datetime, datetime]:
+    """Return [start_date 00:00, end_date+1 00:00) as instants in `timezone_name`.
+
+    Candidate slots are generated in the request's timezone, so the busy lookup
+    has to cover the same local span. Deriving the window from UTC midnights
+    instead shifted it by the zone's offset and left a gap at one end of the
+    range that was never checked against the organizer's calendar.
+    """
+    tz = resolve_timezone(timezone_name)
+    window_start = datetime.combine(start_date, time.min, tzinfo=tz)
+    window_end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=tz)
+    return window_start, window_end
+
+
 def _iter_candidate_starts(
     day: date,
     duration_min: int,
@@ -197,7 +225,7 @@ def generate_suggestions(
     if inputs.duration_min <= 0:
         raise ValueError("duration_min must be positive")
 
-    tz = ZoneInfo(inputs.timezone)
+    tz = resolve_timezone(inputs.timezone)
     template_windows = _windows_for_template(inputs.event_type)
     explicit_windows = tuple(inputs.time_windows)
     allowed_weekdays = (
