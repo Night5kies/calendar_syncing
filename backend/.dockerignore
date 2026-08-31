@@ -1,0 +1,38 @@
+# Git / VCS
+.git
+.gitignore
+
+# Python cache / artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Local env files / secrets
+.env
+.env.*
+!.env.example
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Build/output
+dist/
+build/
+*.log
+
+# Node (if you ever add web stuff)
+node_modules/
